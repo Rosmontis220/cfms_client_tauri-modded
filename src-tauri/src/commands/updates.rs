@@ -930,6 +930,7 @@ async fn find_update_release(
 
     let mut candidates = releases
         .into_iter()
+        .filter(|release| tag_matches_source(source, &release.tag_name))
         .filter(|release| match asset_kind {
             Some(kind) => select_update_asset(release, channel, kind).is_some(),
             None => true,
@@ -1208,6 +1209,20 @@ fn normalize_release_tag(tag: &str) -> &str {
     tag.strip_prefix("modded-").unwrap_or(tag)
 }
 
+/// The modded repository still hosts the older `v0.51.x-modded*` builds, which
+/// belong to the previous application identity and would install over the
+/// standalone build. Only the `modded-vX.Y.Z` tags published by the modded
+/// pipeline count as updates for this source.
+fn tag_matches_source(source: UpdateSource, tag: &str) -> bool {
+    match source {
+        UpdateSource::Modded => {
+            tag.trim().to_ascii_lowercase().starts_with("modded-")
+                && parse_release_version(tag).is_some()
+        }
+        _ => true,
+    }
+}
+
 fn is_release_newer_for_source(
     release_tag: &str,
     current_version: &str,
@@ -1327,6 +1342,19 @@ mod app_update_tests {
             "0.1.0",
             UpdateSource::Modded
         ));
+    }
+
+    #[test]
+    fn modded_source_ignores_legacy_modded_tags() {
+        assert!(tag_matches_source(UpdateSource::Modded, "modded-v0.1.0"));
+        assert!(tag_matches_source(UpdateSource::Modded, " modded-v0.2.0 "));
+        // Released by the previous, non-standalone application.
+        assert!(!tag_matches_source(UpdateSource::Modded, "v0.51.1-modded2"));
+        assert!(!tag_matches_source(UpdateSource::Modded, "v0.51.1"));
+        // Not a semantic version, so it cannot be compared or downloaded.
+        assert!(!tag_matches_source(UpdateSource::Modded, "modded-0.1"));
+        assert!(tag_matches_source(UpdateSource::Custom, "v0.51.1-modded2"));
+        assert!(tag_matches_source(UpdateSource::Official, "v0.51.1"));
     }
 
     #[test]
