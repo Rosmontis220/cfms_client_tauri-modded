@@ -20,7 +20,7 @@ on:
       label:
         description: "Build label used for file names and the release tag (e.g. modded-v0.2.0)"
         required: true
-        default: "modded-v0.1.0"
+        default: "modded-v0.2.0"
       create_release:
         description: "Create a GitHub Release with the built artifacts"
         type: boolean
@@ -299,6 +299,11 @@ jobs:
         with:
           path: artifacts
 
+      # `modded-v0.2.0` -> `0.2.0`, so the title does not read "CFMS Modded
+      # modded-v0.2.0" and the body quotes the version the binaries report.
+      - name: Resolve app version from the tag
+        run: echo "APP_VERSION=${BUILD_LABEL#modded-v}" >> "$GITHUB_ENV"
+
       - name: Flatten artifacts
         run: |
           mkdir -p dist
@@ -314,9 +319,9 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.BUILD_LABEL }}
-          name: CFMS Modded ${{ env.BUILD_LABEL }}
+          name: CFMS Modded ${{ env.APP_VERSION }}
           body: |
-            Modded build `${{ env.BUILD_LABEL }}` (app version 0.1.0).
+            CFMS Modded `${{ env.APP_VERSION }}` (tag `${{ env.BUILD_LABEL }}`).
 
             This is a standalone application (`com.rosmontis220.cfmsmodded` /
             "CFMS Modded"). It installs next to the official and Custom clients and
