@@ -141,6 +141,17 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     requiresAuth: true,
   },
   {
+    // Importing old data is a first-run task, so it is reachable while signed
+    // out. Android cannot read another app's private storage, and the page
+    // explains that instead of pretending to support it.
+    labelKey: 'settings.migration.title',
+    descriptionKey: 'settings.migration.description',
+    icon: 'restoreDialog',
+    href: '/home/settings/migration',
+    group: 'dataOperations',
+    platformScope: 'all',
+  },
+  {
     labelKey: 'settings.activity.title',
     descriptionKey: 'settings.activity.description',
     icon: 'history',

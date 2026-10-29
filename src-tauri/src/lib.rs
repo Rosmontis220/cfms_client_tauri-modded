@@ -14,6 +14,7 @@ mod desktop_shell;
 mod github_credentials;
 mod irc;
 mod local_data_reset;
+mod migration;
 mod localization;
 mod preference_keys;
 mod public_key_auth;
@@ -863,6 +864,8 @@ pub fn run() {
             commands::get_local_data_reset_status,
             commands::reset_local_data,
             commands::retry_local_data_reset,
+            commands::scan_migration_source,
+            commands::import_migration,
             commands::save_credentials,
             commands::load_credentials,
             commands::list_credentials,

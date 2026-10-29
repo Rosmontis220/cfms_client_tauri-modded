@@ -123,7 +123,10 @@ describe('settings overview', () => {
     render(SettingsOverviewPage);
 
     expect(screen.queryByRole('heading', { name: 'settings.overview.security.title' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'settings.overview.groups.dataOperations' })).toBeNull();
+    // Importing old data is a first-run task, so its group stays visible with
+    // only that entry in it.
+    expect(screen.getByRole('button', { name: /settings\.migration\.title/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /settings\.tasks\.title/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /settings\.account\.title/ })).toBeNull();
     expect(screen.getByRole('button', { name: /settings\.connection\.title/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /settings\.localData\.title/ })).toBeTruthy();

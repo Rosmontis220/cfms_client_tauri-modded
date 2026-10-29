@@ -35,6 +35,7 @@ describe('settings entry visibility', () => {
     expect(groups.find((group) => group.id === 'dataOperations')?.entries.map((entry) => entry.href)).toEqual([
       '/home/settings/file-sync',
       '/home/settings/storage',
+      '/home/settings/migration',
       '/home/settings/activity',
       '/home/settings/tasks',
     ]);
@@ -46,6 +47,14 @@ describe('settings entry visibility', () => {
 
     expect(desktop.flatMap((group) => group.entries).some((entry) => entry.href === '/home/settings/behavior')).toBe(false);
     expect(mobile.find((group) => group.id === 'personalization')?.entries.at(-1)?.href).toBe('/home/settings/behavior');
+  });
+
+  it('keeps the data import entry available while signed out', () => {
+    const signedOut = getVisibleSettingsEntries({ isLoggedIn: false, isMobile: false });
+    const signedIn = getVisibleSettingsEntries({ isLoggedIn: true, isMobile: false });
+
+    expect(signedOut.some((entry) => entry.href === '/home/settings/migration')).toBe(true);
+    expect(signedIn.some((entry) => entry.href === '/home/settings/migration')).toBe(true);
   });
 
   it('hides the account entry from signed-out users', () => {
