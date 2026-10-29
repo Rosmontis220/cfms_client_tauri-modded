@@ -36,6 +36,7 @@
   } from '$lib/keyboard';
   import { supportsKeyboardShortcuts } from '$lib/platform';
   import { extensionsStore } from '$lib/extensions.svelte';
+  import { startIrcEvents } from '$lib/irc/store.svelte';
   import { USER_EXTENSIONS_ENABLED } from '$lib/feature-flags';
   import { isIconName } from '$lib/icons';
   import { shouldOfferConnectionReturn } from '$lib/public-utility-navigation';
@@ -92,6 +93,7 @@
   );
   const isToolsRoute = $derived($page.url.pathname === '/home/tools');
   const isChatRoute = $derived($page.url.pathname === '/home/chat');
+  const isIrcRoute = $derived($page.url.pathname === '/home/irc');
   const isPublicUtilityRoute = $derived(
     $page.url.pathname === '/home/about'
       || $page.url.pathname === '/home/settings'
@@ -139,7 +141,10 @@
     { id: 'about', label: $t('workspace.about'), href: '/home/about', icon: 'info' },
   ]);
   const navigationHasActiveItem = $derived(
-    [...primaryNavigation, ...bottomNavigation].some((item) => isActive(item)) || isToolsRoute || isChatRoute,
+    [...primaryNavigation, ...bottomNavigation].some((item) => isActive(item))
+      || isToolsRoute
+      || isChatRoute
+      || isIrcRoute,
   );
 
   const currentTitle = $derived.by(() => {
@@ -159,6 +164,7 @@
     if (path === '/home/notifications') return $t('notifications.title');
     if (path === '/home/tools') return $t('tools.title');
     if (path === '/home/chat') return $t('chat.title');
+    if (path === '/home/irc') return $t('irc.title');
     if (path === '/home/manage') return $t('workspace.administration');
     if (path === '/home/schedules') return $t('workspace.schedules');
     if (path === '/home/diagnostics') return $t('workspace.diagnostics');
@@ -200,6 +206,11 @@
     // The background checker only runs for a signed-in account, so its published
     // report and countdown have to be re-read whenever the session changes.
     void refreshFileAutoCheckState();
+  });
+
+  onMount(() => {
+    // IRC traffic is captured app-wide so the transcript survives navigation.
+    void startIrcEvents();
   });
 
   onMount(() => {
@@ -598,6 +609,20 @@
         </div>
         {/if}
       </nav>
+
+      {#if authStore.isLoggedIn}
+        <button
+          data-nav-item
+          type="button"
+          tabindex={isIrcRoute ? 0 : -1}
+          class="explorer-nav-item"
+          class:explorer-nav-item--active={isIrcRoute}
+          aria-current={isIrcRoute ? 'page' : undefined}
+          onclick={() => navigate('/home/irc')}
+        >
+          <Icon name="groups" size="19px" /><span>{$t('irc.title')}</span>
+        </button>
+      {/if}
 
       {#if authStore.isLoggedIn}
         <button

@@ -1,0 +1,323 @@
+name: Modded Build
+
+# Builds the modded client (Windows portable, Linux packages, Android APK) without
+# the upstream code-signing secrets. Trigger it manually or push a `modded-*` tag.
+#
+# Why a separate workflow instead of release.yml:
+#   * release.yml only accepts `v*` tags and needs Windows EV signing, Tauri updater
+#     signing and Android keystore secrets that this repository does not own;
+#   * here the updater artifacts are disabled (no signing key) and the Android APK is
+#     signed with a repository-owned keystore so consecutive builds can upgrade in place.
+
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Build label used for file names and the release tag (e.g. modded-0.1)"
+        required: true
+        default: "modded-0.1"
+      create_release:
+        description: "Create a GitHub Release with the built artifacts"
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "modded-*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: "29.0.14206865"
+  # `github.event.inputs` is empty for tag pushes, so fall back to the tag name.
+  BUILD_LABEL: ${{ github.event.inputs.label || github.ref_name }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Windows — portable single executable (no installer, no signing key needed)
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Windows (portable)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.11.0
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            crates -> target
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli,sccache
+
+      # `.cargo/config.toml` pins `-Z threads=8`, a nightly-only flag. Setting
+      # RUSTFLAGS replaces the config value while keeping the AES-NI flags from
+      # `[target.'cfg(...)']` in effect.
+      - name: Build portable executable
+        env:
+          RUSTFLAGS: "-C target-feature=+aes,+ssse3"
+        run: cargo tauri build --ci --no-bundle
+
+      - name: Collect artifact
+        shell: pwsh
+        run: |
+          $label = $env:BUILD_LABEL
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/release/cfms-client-tauri.exe" "dist/CFMS-Client-$label-windows-x64-portable.exe"
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-portable
+          path: dist/*.exe
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Linux — AppImage + deb
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Linux (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.11.0
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            crates -> target
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli,sccache
+
+      # `createUpdaterArtifacts` would demand TAURI_SIGNING_PRIVATE_KEY, which this
+      # repository does not have, so it is turned off for this build.
+      - name: Build AppImage and deb
+        env:
+          RUSTFLAGS: "-C target-feature=+aes,+ssse3"
+        run: cargo tauri build --ci --bundles appimage,deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          label="$BUILD_LABEL"
+          find target/release/bundle -name '*.AppImage' -exec cp {} "dist/CFMS-Client-${label}-linux-x86_64.AppImage" \;
+          find target/release/bundle -name '*.deb' -exec cp {} "dist/CFMS-Client-${label}-linux-x86_64.deb" \;
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Android — signed arm64 APK
+  # ---------------------------------------------------------------------------
+  build-android:
+    name: Android (arm64 APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: microsoft
+          java-version: "25"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.11.0
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            crates -> target
+
+      # The Gradle project always applies the "release" signing config, so a
+      # keystore must exist even for CI builds. Prefer the repository secret so
+      # that consecutive builds share one signature and can upgrade in place.
+      - name: Configure signing
+        env:
+          KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          STORE="$RUNNER_TEMP/modded-upload.jks"
+
+          if [ -n "${KEY_BASE64:-}" ]; then
+            echo "Using the ANDROID_KEY_BASE64 secret for signing."
+            printf '%s' "$KEY_BASE64" | base64 -d > "$STORE"
+            ALIAS="${KEY_ALIAS:-cfms}"
+            PASSWORD="${KEY_PASSWORD:-cfmsmodded}"
+          else
+            echo "::warning::ANDROID_KEY_BASE64 is not set — generating a throwaway keystore. APKs from different runs cannot upgrade each other."
+            keytool -genkeypair -v \
+              -keystore "$STORE" \
+              -alias cfmsmodded \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass cfmsmodded -keypass cfmsmodded \
+              -dname "CN=CFMS Modded, OU=Build, O=CFMS, C=CN"
+            ALIAS="cfmsmodded"
+            PASSWORD="cfmsmodded"
+          fi
+
+          cd src-tauri/gen/android
+          {
+            echo "keyAlias=$ALIAS"
+            echo "password=$PASSWORD"
+            echo "storeFile=$STORE"
+          } > keystore.properties
+
+      - name: Build APK
+        env:
+          RUSTFLAGS: ""
+        run: pnpm tauri android build --ci --apk --target aarch64
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          label="$BUILD_LABEL"
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          if [ -z "$apk" ]; then
+            echo "::error::No APK produced"
+            find src-tauri/gen/android/app/build/outputs -maxdepth 4 -type d
+            exit 1
+          fi
+          cp "$apk" "dist/CFMS-Client-${label}-android-arm64.apk"
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-aarch64
+          path: dist/*.apk
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Release — attach everything to a `modded-*` release
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish release
+    needs:
+      - build-windows
+      - build-linux
+      - build-android
+    if: ${{ github.event_name == 'push' || inputs.create_release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          ls -lh dist
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUILD_LABEL }}
+          name: CFMS Client ${{ env.BUILD_LABEL }}
+          body: |
+            Modded build `${{ env.BUILD_LABEL }}` (app version 0.1.0).
+
+            - Windows: portable single executable, extract and run.
+            - Linux: AppImage and deb.
+            - Android: arm64 APK signed with the repository keystore
+              (uninstall the previous version first when the signature differs).
+          files: |
+            dist/*
+          prerelease: true
+          fail_on_unmatched_files: true

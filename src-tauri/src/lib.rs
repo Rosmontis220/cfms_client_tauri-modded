@@ -12,6 +12,7 @@ mod commands;
 mod file_auto_check;
 mod desktop_shell;
 mod github_credentials;
+mod irc;
 mod local_data_reset;
 mod localization;
 mod preference_keys;
@@ -411,6 +412,7 @@ pub fn run() {
             }
             app.manage(github_credentials);
             app.manage(preference_keys::PreferenceKeys::default());
+            app.manage(irc::IrcState::default());
 
             let mut log_targets = Vec::new();
             if cfg!(debug_assertions) {
@@ -870,6 +872,11 @@ pub fn run() {
             commands::send_raw_request,
             commands::fetch_server_page,
             commands::open_dev_tools_window,
+            irc::irc_connect,
+            irc::irc_disconnect,
+            irc::irc_send_message,
+            irc::irc_raw,
+            irc::irc_status,
         ])
         .on_window_event(|window, event| {
             // Close-button policy: quit, hide to the tray, or ask the Webview.
