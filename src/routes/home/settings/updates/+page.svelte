@@ -1,11 +1,12 @@
 <script lang="ts">
   import FluentButton from '$lib/components/FluentButton.svelte';
   import { goto } from '$app/navigation';
+  import { openUrl } from '@tauri-apps/plugin-opener';
   import { onMount } from 'svelte';
   import { _ as t } from 'svelte-i18n';
   import { getSetting, setSetting } from '$lib/api';
   import { appUpdateState } from '$lib/app-update-state.svelte';
-  import type { UpdateChannel, UpdateSource } from '$lib/updater';
+  import { MODDED_RELEASES_URL, type UpdateChannel, type UpdateSource } from '$lib/updater';
   import {
     ACTIVE_UPDATE_CHECK_PAUSE,
     createUpdateCheckPause,
@@ -20,10 +21,10 @@
   import { focusRovingItem } from '$lib/keyboard';
 
   const channels: UpdateChannel[] = ['stable', 'beta', 'alpha'];
-  const sources: UpdateSource[] = ['official', 'custom'];
+  const sources: UpdateSource[] = ['modded', 'official', 'custom'];
 
   let channel = $state<UpdateChannel>('stable');
-  let source = $state<UpdateSource>('custom');
+  let source = $state<UpdateSource>('modded');
   let mirrorAcceleration = $state(true);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -69,7 +70,7 @@
       } else {
         channel = appUpdateState.channel;
       }
-      if (savedSource === 'official' || savedSource === 'custom') {
+      if (savedSource === 'official' || savedSource === 'custom' || savedSource === 'modded') {
         source = savedSource;
         if (appUpdateState.source !== savedSource) appUpdateState.setUpdateSource(savedSource);
       } else {
@@ -184,10 +185,10 @@
         channel = 'stable';
         appUpdateState.setChannel('stable');
       }
-      if (source !== 'custom') {
-        await setSetting('update_source', 'custom');
-        source = 'custom';
-        appUpdateState.setUpdateSource('custom');
+      if (source !== 'modded') {
+        await setSetting('update_source', 'modded');
+        source = 'modded';
+        appUpdateState.setUpdateSource('modded');
       }
       if (!mirrorAcceleration) {
         await appUpdateState.setMirrorAcceleration(true);
@@ -199,6 +200,14 @@
         await appUpdateState.setAutomaticCheckPause(ACTIVE_UPDATE_CHECK_PAUSE);
       }
     });
+  }
+
+  async function openModdedReleases() {
+    try {
+      await openUrl(MODDED_RELEASES_URL);
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
   }
 
   function handleRadioKeydown(event: KeyboardEvent) {
@@ -377,6 +386,28 @@
       </div>
     </section>
 
+    <section class="update-section settings-section" aria-labelledby="modded-build-heading">
+      <div class="settings-section-heading">
+        <h2 id="modded-build-heading">{$t('settings.updates.moddedBuild')}</h2>
+        <p>{$t('settings.updates.moddedBuildHint')}</p>
+      </div>
+
+      <div class="settings-row modded-row">
+        <span class="modded-copy settings-row__copy">
+          <span class="channel-name">{$t('settings.updates.moddedBuildRepo')}</span>
+          <span class="channel-description">{$t('settings.updates.moddedBuildRepoHint')}</span>
+        </span>
+        <FluentButton data-fluent-owner="routes-home-settings-updates-page"
+          type="button"
+          appearance="outline"
+          onclick={openModdedReleases}
+        >
+          <Icon name="openInNew" size="18px" />
+          {$t('settings.updates.moddedBuildOpen')}
+        </FluentButton>
+      </div>
+    </section>
+
     <section class="update-section settings-section" aria-labelledby="update-mirror-heading">
       <div class="settings-section-heading">
         <h2 id="update-mirror-heading">{$t('settings.updates.mirrorAcceleration')}</h2>
@@ -516,6 +547,16 @@
   }
 
   .mirror-copy {
+    display: grid;
+    gap: 4px;
+  }
+
+  .modded-row {
+    align-items: center;
+    gap: 16px;
+  }
+
+  .modded-copy {
     display: grid;
     gap: 4px;
   }

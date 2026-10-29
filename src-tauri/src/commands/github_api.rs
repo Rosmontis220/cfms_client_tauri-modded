@@ -11,6 +11,7 @@ impl GithubApiEndpoint {
         match self {
             Self::UpdateReleases(UpdateSource::Official) => OFFICIAL_UPDATE_RELEASES_API,
             Self::UpdateReleases(UpdateSource::Custom) => CUSTOM_UPDATE_RELEASES_API,
+            Self::UpdateReleases(UpdateSource::Modded) => MODDED_UPDATE_RELEASES_API,
             Self::CaCertificates => CA_CERT_API_URL,
         }
     }
@@ -282,6 +283,7 @@ mod github_api_tests {
         for endpoint in [
             GithubApiEndpoint::UpdateReleases(UpdateSource::Official),
             GithubApiEndpoint::UpdateReleases(UpdateSource::Custom),
+            GithubApiEndpoint::UpdateReleases(UpdateSource::Modded),
             GithubApiEndpoint::CaCertificates,
         ] {
             let request = github_api_request(&client, endpoint.url(), Some("private-token"))
@@ -323,17 +325,23 @@ mod github_api_tests {
             GithubApiEndpoint::UpdateReleases(UpdateSource::Custom).url(),
             "https://api.github.com/repos/DoubleCircle-dev/cfms_client_tauri-custom/releases"
         );
+        assert_eq!(
+            GithubApiEndpoint::UpdateReleases(UpdateSource::Modded).url(),
+            "https://api.github.com/repos/Rosmontis220/cfms_client_tauri-modded/releases"
+        );
     }
 
     #[test]
-    fn update_source_defaults_to_custom_and_accepts_official() {
-        assert_eq!(UpdateSource::parse(None), UpdateSource::Custom);
+    fn update_source_defaults_to_modded_and_accepts_every_source() {
+        assert_eq!(UpdateSource::parse(None), UpdateSource::Modded);
         assert_eq!(
             UpdateSource::parse(Some("official")),
             UpdateSource::Official
         );
         assert_eq!(UpdateSource::parse(Some("custom")), UpdateSource::Custom);
-        assert_eq!(UpdateSource::parse(Some("unknown")), UpdateSource::Custom);
+        assert_eq!(UpdateSource::parse(Some("modded")), UpdateSource::Modded);
+        assert_eq!(UpdateSource::parse(Some(" MODDED ")), UpdateSource::Modded);
+        assert_eq!(UpdateSource::parse(Some("unknown")), UpdateSource::Modded);
     }
 
     #[test]

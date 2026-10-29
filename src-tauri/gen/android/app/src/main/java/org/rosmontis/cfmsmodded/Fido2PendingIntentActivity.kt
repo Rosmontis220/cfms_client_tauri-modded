@@ -1,4 +1,4 @@
-package org.crpteam.cfms_client_tauri
+package org.rosmontis.cfmsmodded
 
 import android.app.Activity
 import android.app.PendingIntent
@@ -58,7 +58,7 @@ class Fido2PendingIntentActivity : Activity() {
     }
 
     companion object {
-        const val EXTRA_PENDING_INTENT = "org.crpteam.cfms_client_tauri.FIDO2_PENDING_INTENT"
+        const val EXTRA_PENDING_INTENT = "org.rosmontis.cfmsmodded.FIDO2_PENDING_INTENT"
         private const val KEY_WAITING_FOR_RESULT = "waiting_for_result"
         private const val REQUEST_CODE = 10073
     }

@@ -21,10 +21,13 @@
   let activeVersion = $state<string | null>(null);
 
   const update = $derived(appUpdateState.update);
+  const releasePageOnly = $derived(update?.installMode === 'release-page');
   const installButtonLabel = $derived(
-    update?.installMode === 'android-apk'
-      ? $t('settings.updates.downloadAndOpenInstaller')
-      : $t('settings.updates.downloadAndInstall'),
+    releasePageOnly
+      ? $t('settings.updates.openRelease')
+      : update?.installMode === 'android-apk'
+        ? $t('settings.updates.downloadAndOpenInstaller')
+        : $t('settings.updates.downloadAndInstall'),
   );
   const installCompleteMessage = $derived(
     update?.installMode === 'android-apk'
@@ -49,6 +52,13 @@
 
   async function installUpdate() {
     if (!update || appUpdateState.installing) return;
+
+    if (update.installMode === 'release-page') {
+      await openReleasePage();
+      visible = false;
+      return;
+    }
+
     visible = false;
 
     try {
@@ -137,21 +147,23 @@
           {#if appUpdateState.installing}
             <ProgressRing size={18} strokeWidth={2.4} label={$t('settings.updates.installing')} />
           {:else}
-            <Icon name="download" size="18px" />
+            <Icon name={releasePageOnly ? 'openInNew' : 'download'} size="18px" />
           {/if}
           {installButtonLabel}
         </FluentButton>
 
-        <FluentButton data-fluent-owner="lib-components-new-update-prompt"
-          type="button"
-          onclick={openReleasePage}
-          disabled={appUpdateState.installing}
-          appearance="subtle"
-          class="tonal-action"
-        >
-          <Icon name="openInNew" size="18px" />
-          {$t('settings.updates.openRelease')}
-        </FluentButton>
+        {#if !releasePageOnly}
+          <FluentButton data-fluent-owner="lib-components-new-update-prompt"
+            type="button"
+            onclick={openReleasePage}
+            disabled={appUpdateState.installing}
+            appearance="subtle"
+            class="tonal-action"
+          >
+            <Icon name="openInNew" size="18px" />
+            {$t('settings.updates.openRelease')}
+          </FluentButton>
+        {/if}
 
         <FluentButton data-fluent-owner="lib-components-new-update-prompt"
           type="button"

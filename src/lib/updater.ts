@@ -2,7 +2,11 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 
 export type UpdateChannel = 'stable' | 'beta' | 'alpha';
-export type UpdateSource = 'official' | 'custom';
+export type UpdateSource = 'official' | 'custom' | 'modded';
+
+/** Human-facing entry point for this build's own releases. */
+export const MODDED_RELEASES_URL = 'https://github.com/Rosmontis220/cfms_client_tauri-modded/releases';
+export const MODDED_REPOSITORY_URL = 'https://github.com/Rosmontis220/cfms_client_tauri-modded';
 
 export interface AppUpdateMetadata {
   currentVersion: string;
@@ -11,7 +15,12 @@ export interface AppUpdateMetadata {
   body?: string | null;
   channel: UpdateChannel;
   releaseUrl: string;
-  installMode: 'desktop' | 'android-apk';
+  /**
+   * `release-page` means the release ships no signed updater artifact (the modded
+   * desktop builds): the update is announced, but it is downloaded by hand from
+   * `releaseUrl`.
+   */
+  installMode: 'desktop' | 'android-apk' | 'release-page';
 }
 
 export type AppUpdateDownloadEvent =

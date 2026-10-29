@@ -19,10 +19,11 @@ const mocks = vi.hoisted(() => ({
   navigateUp: vi.fn(),
   choose: vi.fn(),
   confirm: vi.fn(),
+  openUrl: vi.fn(),
   notificationError: vi.fn(),
   appUpdateState: {
     channel: 'stable',
-    source: 'custom',
+    source: 'modded',
     mirrorAcceleration: true,
     automaticCheckPause: { mode: 'active' } as UpdateCheckPause,
     isAutomaticCheckPaused: false,
@@ -52,6 +53,7 @@ vi.mock('$app/state', () => ({
   page: { url: new URL('https://example.test/home/settings/updates') },
 }));
 vi.mock('$lib/navigation', () => ({ navigateUp: mocks.navigateUp }));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: mocks.openUrl }));
 
 const now = Date.UTC(2026, 8, 11, 8, 0, 0);
 
@@ -59,7 +61,7 @@ beforeEach(() => {
   locale.set('en');
   vi.spyOn(Date, 'now').mockReturnValue(now);
   mocks.appUpdateState.channel = 'stable';
-  mocks.appUpdateState.source = 'custom';
+  mocks.appUpdateState.source = 'modded';
   mocks.appUpdateState.automaticCheckPause = { mode: 'active' };
   mocks.appUpdateState.isAutomaticCheckPaused = false;
   mocks.appUpdateState.mirrorAcceleration = true;
@@ -78,6 +80,7 @@ beforeEach(() => {
   });
   mocks.choose.mockResolvedValue(null);
   mocks.confirm.mockResolvedValue(false);
+  mocks.openUrl.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -237,10 +240,28 @@ describe('update settings pause controls', () => {
     await fireEvent.click(reset);
 
     await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledWith('update_channel', 'stable'));
-    await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledWith('update_source', 'custom'));
+    await waitFor(() => expect(mocks.setSetting).toHaveBeenCalledWith('update_source', 'modded'));
     expect(mocks.appUpdateState.setChannel).toHaveBeenCalledWith('stable');
-    expect(mocks.appUpdateState.setUpdateSource).toHaveBeenCalledWith('custom');
+    expect(mocks.appUpdateState.setUpdateSource).toHaveBeenCalledWith('modded');
     expect(mocks.appUpdateState.resumeAutomaticChecks).toHaveBeenCalledOnce();
+  });
+
+  it('defaults the update source to the modded releases', async () => {
+    render(UpdatesSettingsPage);
+
+    const modded = await screen.findByRole('radio', { name: /CFMS Modded \(this build\)/ }) as HTMLButtonElement;
+    await waitFor(() => expect(modded.disabled).toBe(false));
+    expect(modded.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('navigates to the modded release page', async () => {
+    render(UpdatesSettingsPage);
+
+    await fireEvent.click(await enabledButton('Open releases'));
+
+    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledExactlyOnceWith(
+      'https://github.com/Rosmontis220/cfms_client_tauri-modded/releases',
+    ));
   });
 });
 

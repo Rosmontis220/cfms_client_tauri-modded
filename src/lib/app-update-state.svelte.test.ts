@@ -154,7 +154,7 @@ describe('automatic update check scheduling', () => {
     state.disposeAutomaticChecks();
   });
 
-  it('defaults to the custom update source when no source is saved', async () => {
+  it('defaults to the modded update source when no source is saved', async () => {
     mocks.getSetting.mockImplementation(async (key: string) => {
       if (key === UPDATE_CHECK_PAUSE_SETTING_KEY) {
         return serializeUpdateCheckPause(ACTIVE_UPDATE_CHECK_PAUSE);
@@ -166,8 +166,8 @@ describe('automatic update check scheduling', () => {
 
     await state.initializeAutomaticChecks();
 
-    expect(state.source).toBe('custom');
-    expect(mocks.checkAppUpdate).toHaveBeenCalledWith('stable', 'custom');
+    expect(state.source).toBe('modded');
+    expect(mocks.checkAppUpdate).toHaveBeenCalledWith('stable', 'modded');
     state.disposeAutomaticChecks();
   });
 

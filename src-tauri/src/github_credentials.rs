@@ -12,7 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Runtime};
 use zeroize::Zeroizing;
 
-const SERVICE: &str = "org.crpteam.cfms_client_tauri.github-api";
+const SERVICE: &str = "org.rosmontis.cfmsmodded.github-api";
 const ACCOUNT: &str = "personal-access-token";
 const MAX_TOKEN_LEN: usize = 4096;
 const STORAGE_UNAVAILABLE: &str = "GitHub credential storage is unavailable on this device.";

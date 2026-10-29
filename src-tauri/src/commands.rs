@@ -39,6 +39,11 @@ const OFFICIAL_UPDATE_RELEASES_API: &str =
     "https://api.github.com/repos/cfms-dev/cfms_client_tauri/releases";
 const CUSTOM_UPDATE_RELEASES_API: &str =
     "https://api.github.com/repos/DoubleCircle-dev/cfms_client_tauri-custom/releases";
+/// Releases published by the modded build itself. This is the default source for
+/// this build so that an installed modded client upgrades from the modded repo
+/// instead of pulling an upstream build over itself.
+const MODDED_UPDATE_RELEASES_API: &str =
+    "https://api.github.com/repos/Rosmontis220/cfms_client_tauri-modded/releases";
 #[cfg(not(target_os = "android"))]
 const OFFICIAL_UPDATER_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE5MkZFRTVFRTI3OEJGOEUKUldTT3YzamlYdTR2R1pzTjk5dU0zSVQ1RWR3OHExOEJ4dFcrT1ZMVnFrdXA2YjFCRk5udkQ3M2IK";
 const UPDATE_USER_AGENT: &str = "cfms-client-tauri-updater";

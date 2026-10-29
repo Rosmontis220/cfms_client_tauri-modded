@@ -323,19 +323,21 @@ impl UpdateChannel {
 enum UpdateSource {
     Official,
     Custom,
+    Modded,
 }
 
 impl UpdateSource {
     fn parse(value: Option<&str>) -> Self {
         match value
-            .unwrap_or("custom")
+            .unwrap_or("modded")
             .trim()
             .to_ascii_lowercase()
             .as_str()
         {
             "official" => Self::Official,
             "custom" => Self::Custom,
-            _ => Self::Custom,
+            "modded" => Self::Modded,
+            _ => Self::Modded,
         }
     }
 
@@ -343,6 +345,7 @@ impl UpdateSource {
         match self {
             Self::Official => "official",
             Self::Custom => "custom",
+            Self::Modded => "modded",
         }
     }
 }

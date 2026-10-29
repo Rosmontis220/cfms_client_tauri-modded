@@ -100,6 +100,18 @@ function renderChecker(onOpenFeatureTour?: () => void | Promise<void>) {
 }
 
 describe('AppUpdateChecker', () => {
+  it('announces release-page updates without offering an in-app install', async () => {
+    mocks.appUpdateState.update = { ...availableUpdate, installMode: 'release-page' };
+    mocks.appUpdateState.checked = true;
+    renderChecker();
+
+    await waitFor(() => expect(screen.getByText('Update available')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Download and Install' })).toBeNull();
+    expect(screen.getByText(/no signed auto-update package/i)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Open release page/ }).getAttribute('href'))
+      .toBe('https://example.com/releases/0.44.0');
+  });
+
   it('uses the supplied version as accessible context and emphasizes checking while idle', async () => {
     renderChecker();
 

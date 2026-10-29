@@ -1,4 +1,4 @@
-package org.crpteam.cfms_client_tauri
+package org.rosmontis.cfmsmodded
 
 import android.Manifest
 import android.app.NotificationChannel

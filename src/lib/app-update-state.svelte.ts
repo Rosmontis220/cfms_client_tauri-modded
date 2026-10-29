@@ -46,7 +46,7 @@ function parseMirrorAcceleration(value: string | null): boolean {
 
 export class AppUpdateState {
   channel = $state<UpdateChannel>('stable');
-  source = $state<UpdateSource>('custom');
+  source = $state<UpdateSource>('modded');
   mirrorAcceleration = $state(true);
   automaticCheckPause = $state<UpdateCheckPause>(ACTIVE_UPDATE_CHECK_PAUSE);
   automaticCheckSettled = $state(false);
@@ -361,7 +361,7 @@ function isUpdateChannel(value: string | null): value is UpdateChannel {
 }
 
 function isUpdateSource(value: string | null): value is UpdateSource {
-  return value === 'official' || value === 'custom';
+  return value === 'official' || value === 'custom' || value === 'modded';
 }
 
 export const appUpdateState = new AppUpdateState();

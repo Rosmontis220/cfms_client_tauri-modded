@@ -19,10 +19,10 @@ val splitReleaseApks = providers.gradleProperty("SplitApks")
 
 android {
     compileSdk = 36
-    namespace = "org.crpteam.cfms_client_tauri"
+    namespace = "org.rosmontis.cfmsmodded"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "org.crpteam.cfms_client_tauri"
+        applicationId = "org.rosmontis.cfmsmodded"
         minSdk = 28
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

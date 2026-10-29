@@ -78,6 +78,7 @@
       ? $t('settings.updates.installCompleteAndroid')
       : $t('settings.updates.installComplete'),
   );
+  const releasePageOnly = $derived(appUpdateState.update?.installMode === 'release-page');
   const installButtonLabel = $derived(
     appUpdateState.update?.installMode === 'android-apk'
       ? $t('settings.updates.downloadAndOpenInstaller')
@@ -273,6 +274,12 @@
           <MarkdownView content={appUpdateState.update.body} compact />
         </div>
       {/if}
+      {#if releasePageOnly}
+        <p class="release-page-hint">
+          <Icon name="info" size="16px" />
+          {$t('settings.updates.releasePageHint')}
+        </p>
+      {/if}
       <a href={appUpdateState.update.releaseUrl} target="_blank" rel="noreferrer">
         {$t('settings.updates.openRelease')}
         <Icon name="openInNew" size="16px" />
@@ -314,7 +321,7 @@
   {/if}
 
   <div class="actions">
-    {#if appUpdateState.update && !appUpdateState.installed}
+    {#if appUpdateState.update && !appUpdateState.installed && !releasePageOnly}
       <FluentButton data-fluent-owner="lib-components-app-update-checker"
         onclick={installUpdate}
         disabled={appUpdateState.installing || appUpdateState.checking}
@@ -331,7 +338,7 @@
       </FluentButton>
     {/if}
 
-    {#if appUpdateState.installed && appUpdateState.update?.installMode !== 'android-apk'}
+    {#if appUpdateState.installed && appUpdateState.update?.installMode === 'desktop'}
       <FluentButton data-fluent-owner="lib-components-app-update-checker"
         onclick={restartNow}
         type="button"
@@ -531,6 +538,16 @@
     margin: 0;
     padding-left: 0.75rem;
     border-left: 2px solid color-mix(in srgb, var(--color-md3-primary-emphasis) 58%, transparent);
+  }
+
+  .release-page-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--color-md3-on-surface-variant);
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   a {

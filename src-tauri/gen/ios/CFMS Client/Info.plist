@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>CFMS Client</string>
 	<key>CFBundleIdentifier</key>
-	<string>org.crpteam.cfms-client-tauri</string>
+	<string>org.rosmontis.cfmsmodded</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -52,8 +52,8 @@
 	<!-- Allow the background service plugin to schedule periodic tasks -->
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>org.crpteam.cfms-client-tauri.refresh</string>
-		<string>org.crpteam.cfms-client-tauri.processing</string>
+		<string>org.rosmontis.cfmsmodded.refresh</string>
+		<string>org.rosmontis.cfmsmodded.processing</string>
 	</array>
 </dict>
 </plist>

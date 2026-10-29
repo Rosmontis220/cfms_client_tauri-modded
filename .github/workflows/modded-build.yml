@@ -8,14 +8,19 @@ name: Modded Build
 #     signing and Android keystore secrets that this repository does not own;
 #   * here the updater artifacts are disabled (no signing key) and the Android APK is
 #     signed with a repository-owned keystore so consecutive builds can upgrade in place.
+#
+# The modded build is its own application (`org.rosmontis.cfmsmodded`), so it installs
+# alongside the official and Custom clients instead of replacing them. Tag releases as
+# `modded-vX.Y.Z`: the in-app updater reads its default source from this repository and
+# compares the tag as a plain semantic version.
 
 on:
   workflow_dispatch:
     inputs:
       label:
-        description: "Build label used for file names and the release tag (e.g. modded-0.1)"
+        description: "Build label used for file names and the release tag (e.g. modded-v0.2.0)"
         required: true
-        default: "modded-0.1"
+        default: "modded-v0.1.0"
       create_release:
         description: "Create a GitHub Release with the built artifacts"
         type: boolean
@@ -84,7 +89,7 @@ jobs:
         run: |
           $label = $env:BUILD_LABEL
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/release/cfms-client-tauri.exe" "dist/CFMS-Client-$label-windows-x64-portable.exe"
+          Copy-Item "target/release/cfms-client-tauri.exe" "dist/CFMS-Modded-$label-windows-x64-portable.exe"
           Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v7
@@ -152,8 +157,8 @@ jobs:
         run: |
           mkdir -p dist
           label="$BUILD_LABEL"
-          find target/release/bundle -name '*.AppImage' -exec cp {} "dist/CFMS-Client-${label}-linux-x86_64.AppImage" \;
-          find target/release/bundle -name '*.deb' -exec cp {} "dist/CFMS-Client-${label}-linux-x86_64.deb" \;
+          find target/release/bundle -name '*.AppImage' -exec cp {} "dist/CFMS-Modded-${label}-linux-x86_64.AppImage" \;
+          find target/release/bundle -name '*.deb' -exec cp {} "dist/CFMS-Modded-${label}-linux-x86_64.deb" \;
           ls -lh dist
 
       - uses: actions/upload-artifact@v7
@@ -264,7 +269,7 @@ jobs:
             find src-tauri/gen/android/app/build/outputs -maxdepth 4 -type d
             exit 1
           fi
-          cp "$apk" "dist/CFMS-Client-${label}-android-arm64.apk"
+          cp "$apk" "dist/CFMS-Modded-${label}-android-arm64.apk"
           ls -lh dist
 
       - uses: actions/upload-artifact@v7
@@ -309,15 +314,24 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.BUILD_LABEL }}
-          name: CFMS Client ${{ env.BUILD_LABEL }}
+          name: CFMS Modded ${{ env.BUILD_LABEL }}
           body: |
             Modded build `${{ env.BUILD_LABEL }}` (app version 0.1.0).
 
+            This is a standalone application (`org.rosmontis.cfmsmodded` /
+            "CFMS Modded"). It installs next to the official and Custom clients and
+            does not replace them; the first launch starts with a fresh profile.
+
             - Windows: portable single executable, extract and run.
             - Linux: AppImage and deb.
-            - Android: arm64 APK signed with the repository keystore
-              (uninstall the previous version first when the signature differs).
+            - Android: `*-android-arm64.apk`, signed with the repository keystore.
+              The in-app updater of the modded client pulls from this repository by
+              default, so later `modded-v*` releases update in place.
+            - Desktop packages carry no updater signature yet, so Windows/Linux users
+              download new builds from this page.
           files: |
             dist/*
-          prerelease: true
+          # Modded releases are the stable line for this build: the in-app
+          # updater's default channel is stable, and prereleases are ignored there.
+          prerelease: false
           fail_on_unmatched_files: true

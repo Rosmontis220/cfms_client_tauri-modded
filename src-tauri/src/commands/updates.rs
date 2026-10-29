@@ -31,12 +31,19 @@ pub async fn check_app_update(
         describe_update_proxy(proxy_url.as_ref())
     );
     let client = update_api_http_client(proxy_url.as_ref())?;
+    // Modded releases are portable packages without updater signatures, so the
+    // manifest is optional there and the release itself becomes the update offer.
+    let asset_kind = if source == UpdateSource::Modded {
+        None
+    } else {
+        Some(UpdateAssetKind::DesktopManifest)
+    };
     let Some(release) = find_update_release(
         &client,
         &app.state::<crate::github_credentials::GithubCredentialState>(),
         channel,
         source,
-        UpdateAssetKind::DesktopManifest,
+        asset_kind,
     )
     .await?
     else {
@@ -53,7 +60,7 @@ pub async fn check_app_update(
             .lock()
             .map_err(|_| "Updater state is unavailable.".to_string())?;
         *pending = None;
-        return Ok(None);
+        return Ok(release_page_update(&app, &release, channel, source));
     };
 
     let manifest_url = manifest_asset.browser_download_url.clone();
@@ -523,7 +530,7 @@ async fn check_android_app_update(
         &app.state::<crate::github_credentials::GithubCredentialState>(),
         channel,
         source,
-        UpdateAssetKind::AndroidApk { architecture },
+        Some(UpdateAssetKind::AndroidApk { architecture }),
     )
     .await?;
     let Some(release) = release else {
@@ -558,7 +565,7 @@ async fn check_android_app_update(
 
     let metadata = AppUpdateMetadata {
         current_version,
-        version: release.tag_name,
+        version: normalize_release_tag(&release.tag_name).to_string(),
         date: release.published_at,
         body: release.body,
         channel: channel.as_str().to_string(),
@@ -890,6 +897,15 @@ impl AndroidApkArchitecture {
             Self::X86_64 => "app-x86_64-release.apk",
         }
     }
+
+    /// Suffix used by the modded release pipeline, e.g.
+    /// `CFMS-Client-modded-v0.1.0-android-arm64.apk`.
+    fn release_asset_suffix(self) -> &'static str {
+        match self {
+            Self::Arm64 => "-android-arm64.apk",
+            Self::X86_64 => "-android-x86_64.apk",
+        }
+    }
 }
 
 #[cfg(any(target_os = "android", test))]
@@ -900,7 +916,7 @@ async fn find_update_release(
     credentials: &crate::github_credentials::GithubCredentialState,
     channel: UpdateChannel,
     source: UpdateSource,
-    asset_kind: UpdateAssetKind,
+    asset_kind: Option<UpdateAssetKind>,
 ) -> Result<Option<GithubReleaseDto>, String> {
     let releases = github_api_get(
         client,
@@ -914,7 +930,10 @@ async fn find_update_release(
 
     let mut candidates = releases
         .into_iter()
-        .filter(|release| select_update_asset(release, channel, asset_kind).is_some())
+        .filter(|release| match asset_kind {
+            Some(kind) => select_update_asset(release, channel, kind).is_some(),
+            None => true,
+        })
         .filter_map(|release| {
             channel_match_priority(channel, release_channel(&release))
                 .map(|priority| (priority, release))
@@ -997,6 +1016,36 @@ fn describe_update_proxy(proxy_url: Option<&url::Url>) -> String {
         Some(port) => format!("{}://{}:{}", proxy_url.scheme(), host, port),
         None => format!("{}://{}", proxy_url.scheme(), host),
     }
+}
+
+/// Modded releases are published as portable packages without Tauri updater
+/// artifacts, so an installable manifest may legitimately be missing. Offer the
+/// release itself instead of reporting "up to date" and letting the user miss it.
+#[cfg(not(target_os = "android"))]
+fn release_page_update(
+    app: &tauri::AppHandle,
+    release: &GithubReleaseDto,
+    channel: UpdateChannel,
+    source: UpdateSource,
+) -> Option<AppUpdateMetadata> {
+    if source != UpdateSource::Modded {
+        return None;
+    }
+
+    let current_version = app.package_info().version.to_string();
+    if !is_release_newer_for_source(&release.tag_name, &current_version, source) {
+        return None;
+    }
+
+    Some(AppUpdateMetadata {
+        current_version,
+        version: normalize_release_tag(&release.tag_name).to_string(),
+        date: release.published_at.clone(),
+        body: release.body.clone(),
+        channel: channel.as_str().to_string(),
+        release_url: release.html_url.clone(),
+        install_mode: "release-page".to_string(),
+    })
 }
 
 fn select_update_asset(
@@ -1095,6 +1144,14 @@ fn select_android_apk_asset(
                     .eq_ignore_ascii_case(ANDROID_UNIVERSAL_APK_ASSET_NAME)
             })
         })
+        .or_else(|| {
+            release.assets.iter().find(|asset| {
+                asset
+                    .name
+                    .to_ascii_lowercase()
+                    .ends_with(architecture.release_asset_suffix())
+            })
+        })
 }
 
 fn release_channel(release: &GithubReleaseDto) -> UpdateChannel {
@@ -1140,7 +1197,15 @@ fn compare_release_version(
 }
 
 fn parse_release_version(tag: &str) -> Option<semver::Version> {
-    semver::Version::parse(tag.trim_start_matches('v')).ok()
+    semver::Version::parse(normalize_release_tag(tag).trim_start_matches('v')).ok()
+}
+
+/// Modded releases are tagged `modded-vX.Y.Z` so the `modded-*` tag namespace
+/// (and the workflow that listens on it) stays separate from upstream's `v*`
+/// tags. Version comparison and display both work on the bare version.
+fn normalize_release_tag(tag: &str) -> &str {
+    let tag = tag.trim();
+    tag.strip_prefix("modded-").unwrap_or(tag)
 }
 
 fn is_release_newer_for_source(
@@ -1183,7 +1248,7 @@ fn is_custom_iteration(version: &semver::Version) -> bool {
 fn official_updater_pubkey(source: UpdateSource) -> Option<&'static str> {
     match source {
         UpdateSource::Official => Some(OFFICIAL_UPDATER_PUBLIC_KEY),
-        UpdateSource::Custom => None,
+        UpdateSource::Custom | UpdateSource::Modded => None,
     }
 }
 
@@ -1240,6 +1305,28 @@ mod app_update_tests {
             Some(OFFICIAL_UPDATER_PUBLIC_KEY)
         );
         assert_eq!(official_updater_pubkey(UpdateSource::Custom), None);
+        assert_eq!(official_updater_pubkey(UpdateSource::Modded), None);
+    }
+
+    #[test]
+    fn modded_release_tags_are_compared_as_plain_semver() {
+        assert_eq!(normalize_release_tag("modded-v0.2.0"), "v0.2.0");
+        assert_eq!(normalize_release_tag(" v0.2.0 "), "v0.2.0");
+        assert!(is_release_newer_for_source(
+            "modded-v0.2.0",
+            "0.1.0",
+            UpdateSource::Modded
+        ));
+        assert!(!is_release_newer_for_source(
+            "modded-v0.1.0",
+            "0.1.0",
+            UpdateSource::Modded
+        ));
+        assert!(!is_release_newer_for_source(
+            "modded-0.1",
+            "0.1.0",
+            UpdateSource::Modded
+        ));
     }
 
     #[test]
@@ -1303,6 +1390,20 @@ mod app_update_tests {
             selected.map(|asset| asset.name.as_str()),
             Some("app-universal-release.apk")
         );
+    }
+
+    #[test]
+    fn modded_release_asset_names_are_recognized() {
+        let release = release(&[
+            "CFMS-Client-modded-v0.2.0-android-arm64.apk",
+            "CFMS-Client-modded-v0.2.0-windows-x64-portable.exe",
+        ]);
+        let selected = select_android_apk_asset(&release, AndroidApkArchitecture::Arm64);
+        assert_eq!(
+            selected.map(|asset| asset.name.as_str()),
+            Some("CFMS-Client-modded-v0.2.0-android-arm64.apk")
+        );
+        assert!(select_android_apk_asset(&release, AndroidApkArchitecture::X86_64).is_none());
     }
 
     #[test]
