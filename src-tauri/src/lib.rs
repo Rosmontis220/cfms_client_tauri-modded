@@ -931,7 +931,7 @@ fn biometric_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "android")]
 fn apk_installer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("apk-installer")
         .setup(|app, api| {
@@ -949,7 +949,7 @@ fn apk_installer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "android")]
 fn file_opener_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("file-opener")
         .setup(|app, api| {
@@ -967,7 +967,7 @@ fn file_opener_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "android")]
 fn upload_file_importer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("upload-file-importer")
         .setup(|app, api| {
@@ -986,7 +986,7 @@ fn upload_file_importer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugi
 
 #[cfg(target_os = "android")]
 fn android_passkey_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("android-passkey")
         .setup(|app, api| {
@@ -1004,7 +1004,7 @@ fn android_passkey_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> 
 
 #[cfg(target_os = "android")]
 fn android_app_lifecycle_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("android-app-lifecycle")
         .setup(|app, api| {
@@ -1023,7 +1023,7 @@ fn android_app_lifecycle_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlug
 
 #[cfg(target_os = "android")]
 fn android_secure_screen_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("android-secure-screen")
         .setup(|app, api| {
@@ -1042,7 +1042,7 @@ fn android_secure_screen_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlug
 
 #[cfg(target_os = "android")]
 fn android_update_notification_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("android-update-notification")
         .setup(|app, api| {
@@ -1061,7 +1061,7 @@ fn android_update_notification_plugin<R: tauri::Runtime>() -> tauri::plugin::Tau
 
 #[cfg(target_os = "android")]
 fn android_github_credential_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "org.rosmontis.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
 
     tauri::plugin::Builder::new("android-github-credential")
         .setup(|app, api| {

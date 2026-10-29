@@ -9,7 +9,7 @@ name: Modded Build
 #   * here the updater artifacts are disabled (no signing key) and the Android APK is
 #     signed with a repository-owned keystore so consecutive builds can upgrade in place.
 #
-# The modded build is its own application (`org.rosmontis.cfmsmodded`), so it installs
+# The modded build is its own application (`com.rosmontis220.cfmsmodded`), so it installs
 # alongside the official and Custom clients instead of replacing them. Tag releases as
 # `modded-vX.Y.Z`: the in-app updater reads its default source from this repository and
 # compares the tag as a plain semantic version.
@@ -318,7 +318,7 @@ jobs:
           body: |
             Modded build `${{ env.BUILD_LABEL }}` (app version 0.1.0).
 
-            This is a standalone application (`org.rosmontis.cfmsmodded` /
+            This is a standalone application (`com.rosmontis220.cfmsmodded` /
             "CFMS Modded"). It installs next to the official and Custom clients and
             does not replace them; the first launch starts with a fresh profile.
 

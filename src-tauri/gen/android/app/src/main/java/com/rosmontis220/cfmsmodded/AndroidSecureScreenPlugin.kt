@@ -1,4 +1,4 @@
-package org.rosmontis.cfmsmodded
+package com.rosmontis220.cfmsmodded
 
 import android.app.Activity
 import android.view.WindowManager

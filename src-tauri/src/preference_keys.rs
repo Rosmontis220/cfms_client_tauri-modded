@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Mutex};
 use tauri::{Manager, Runtime};
 
-const SERVICE: &str = "org.rosmontis.cfmsmodded.preference-keys";
+const SERVICE: &str = "com.rosmontis220.cfmsmodded.preference-keys";
 #[derive(Default)]
 pub struct PreferenceKeys {
     pub operation: Mutex<()>,
