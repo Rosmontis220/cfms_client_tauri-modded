@@ -15,7 +15,12 @@ html[data-theme="light"] { color-scheme: light; }
 @layer base {
   html,
   body {
-    height: 100%;
+    /* `--app-viewport-height` tracks window.visualViewport (see $lib/app-viewport),
+       so the shell shrinks when the on-screen keyboard opens instead of letting
+       the keyboard cover the bottom of the page. Falls back to 100% on desktop
+       and anywhere the visual viewport is unavailable. */
+    height: var(--app-viewport-height, 100%);
+    max-height: var(--app-viewport-height, 100%);
     overflow: hidden;
     margin: 0;
     padding: 0;

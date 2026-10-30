@@ -1018,6 +1018,7 @@ export const en = {
     logEmpty: 'Nothing here yet — say hello.',
     action: '{nick} {text}',
     composerPlaceholder: 'Message {channel} (Enter to send, Shift+Enter for a new line)',
+    composerPlaceholderShort: 'Message {channel}',
     send: 'Send',
     jumpToLatest: 'Jump to latest',
     errors: {

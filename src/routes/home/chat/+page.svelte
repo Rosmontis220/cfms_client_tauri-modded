@@ -1408,6 +1408,7 @@
 
   .chat-header {
     display: flex;
+    flex: none;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
@@ -2140,10 +2141,107 @@
     background: var(--colorNeutralBackground1Hover);
   }
 
+  /* Phones and narrow windows: the two-column desktop grid leaves the record
+     list a few dozen pixels tall and squeezes the message area, so the room
+     list becomes a horizontal strip and the transcript keeps the rest of the
+     screen. */
   @media (max-width: 820px) {
+    .chat-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 12px 14px 6px;
+    }
+
+    .chat-header-text h1 {
+      font-size: 18px;
+      line-height: 24px;
+    }
+
+    .chat-header-text p {
+      margin-top: 2px;
+      font-size: 12px;
+      line-height: 16px;
+    }
+
+    .chat-header-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chat-mode-hint {
+      margin: 0 14px 8px;
+    }
+
+    .chat-error {
+      margin: 0 14px 8px;
+    }
+
     .chat-body {
-      grid-template-columns: 1fr;
-      grid-template-rows: minmax(160px, 34%) minmax(0, 1fr);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0 14px 12px;
+    }
+
+    .chat-rooms {
+      flex: none;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 6px;
+    }
+
+    .chat-room-list {
+      display: flex;
+      gap: 6px;
+    }
+
+    .chat-room-card {
+      flex: none;
+      width: 168px;
+    }
+
+    .chat-room-rename {
+      display: grid;
+    }
+
+    .chat-state {
+      min-height: 120px;
+    }
+
+    .chat-view-header {
+      padding: 8px 12px;
+    }
+
+    .chat-messages {
+      padding: 10px 12px;
+    }
+
+    .chat-composer {
+      gap: 6px;
+      padding: 8px 12px;
+    }
+
+    .chat-composer-settings {
+      gap: 8px;
+    }
+
+    .chat-composer-name {
+      width: 100%;
+    }
+
+    .chat-compose-entry {
+      gap: 6px;
+    }
+
+    .chat-compose-hint {
+      margin: 0;
+      font-size: 10px;
+      line-height: 14px;
+    }
+
+    .chat-attachments {
+      padding: 8px 12px;
     }
   }
 </style>

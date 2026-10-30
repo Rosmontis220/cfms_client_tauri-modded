@@ -66,8 +66,12 @@
   let connectError = $state<string | null>(null);
   let sendError = $state<string | null>(null);
   let messagesEl = $state<HTMLDivElement | null>(null);
+  let composerEl = $state<HTMLTextAreaElement | null>(null);
   let atBottom = $state(true);
   let runtimeAvailable = $state(true);
+  // The full composer hint is too long for a phone-width single-row field, so
+  // narrow layouts get the short variant instead of a clipped placeholder.
+  let narrowComposer = $state(false);
 
   const connected = $derived(ircStore.connected);
   const statusKey = $derived(STATUS_KEYS[ircStore.status]);
@@ -77,6 +81,12 @@
   const sortedMembers = $derived(
     [...ircStore.members].sort(
       (left, right) => memberRank(left.mode) - memberRank(right.mode) || left.nick.localeCompare(right.nick),
+    ),
+  );
+  const composerPlaceholder = $derived(
+    $t(
+      narrowComposer ? 'irc.composerPlaceholderShort' : 'irc.composerPlaceholder',
+      { values: { channel: ircStore.channel } },
     ),
   );
 
@@ -115,6 +125,29 @@
     void startIrcEvents();
     void ircStore.hydrate();
   });
+
+  onMount(() => {
+    if (typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const query = window.matchMedia('(max-width: 560px)');
+    const sync = () => {
+      narrowComposer = query.matches;
+    };
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  });
+
+  /** Grows the composer with its content so a long draft is never clipped. */
+  function resizeComposer(): void {
+    const el = composerEl;
+    if (!el) {
+      return;
+    }
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 34), 120)}px`;
+  }
 
   // Keep the transcript pinned to the newest line unless the reader scrolled up.
   $effect(() => {
@@ -210,6 +243,7 @@
       if (await ircStore.send(value)) {
         draft = '';
         atBottom = true;
+        void tick().then(resizeComposer);
       }
     } catch (error) {
       sendError = typeof error === 'string' ? error : 'internal';
@@ -402,12 +436,20 @@
             <textarea
               class="cfms-native-field"
               data-focus-ring="delegated"
+              bind:this={composerEl}
               bind:value={draft}
+              oninput={resizeComposer}
               onkeydown={handleComposerKeydown}
+              onfocus={() => {
+                // The keyboard shrinks the transcript; keep the live end in view.
+                if (atBottom) {
+                  scrollToLatest();
+                }
+              }}
               rows="1"
               spellcheck="false"
-              placeholder={$t('irc.composerPlaceholder', { values: { channel: ircStore.channel } })}
-              aria-label={$t('irc.composerPlaceholder', { values: { channel: ircStore.channel } })}
+              placeholder={composerPlaceholder}
+              aria-label={composerPlaceholder}
             ></textarea>
           </div>
           <FluentButton
@@ -415,9 +457,10 @@
             appearance="primary"
             type="submit"
             disabled={!draft.trim()}
+            aria-label={$t('irc.send')}
           >
             <Icon name="arrowForward" size="16px" />
-            <span>{$t('irc.send')}</span>
+            <span class="irc-send-label">{$t('irc.send')}</span>
           </FluentButton>
         </form>
 
@@ -570,6 +613,10 @@
     min-height: 0;
     flex: 1;
     grid-template-columns: minmax(0, 1fr) 200px;
+    /* The row must be allowed to shrink below its content, otherwise the
+       room card grows past the viewport on phones and pushes the composer
+       (and the newest lines) off screen. */
+    grid-template-rows: minmax(0, 1fr);
     gap: 14px;
   }
 
@@ -698,6 +745,7 @@
     max-height: 120px;
     min-height: 34px;
     resize: none;
+    overflow-y: auto;
     border: 0 !important;
     padding: 7px 10px;
     color: var(--explorer-text);
@@ -747,5 +795,26 @@
   @media (max-width: 900px) {
     .irc-body { grid-template-columns: minmax(0, 1fr); }
     .irc-members { display: none; }
+  }
+
+  /* Phones: reclaim the vertical space the desktop title block eats, and keep
+     the composer to a single comfortable row. */
+  @media (max-width: 700px) {
+    .irc-page { gap: 10px; padding: 12px; }
+    .irc-header { flex-wrap: wrap; align-items: center; gap: 8px; }
+    .irc-page :global(.cfms-heading-copy h1) { font-size: 22px; line-height: 28px; }
+    .irc-page :global(.cfms-heading-copy p) { font-size: 12px; line-height: 18px; }
+    .irc-room-header { align-items: center; gap: 8px; padding: 8px 12px; }
+    .irc-room-copy p { max-width: 100%; }
+    .irc-messages { padding: 8px 10px; }
+    .irc-line { gap: 6px; padding: 2px 4px; }
+    .irc-composer { padding: 8px 10px; }
+  }
+
+  @media (max-width: 430px) {
+    /* The label plus a usable field does not fit; the icon keeps its meaning
+       through aria-label. */
+    .irc-composer { gap: 6px; }
+    .irc-send-label { display: none; }
   }
 </style>

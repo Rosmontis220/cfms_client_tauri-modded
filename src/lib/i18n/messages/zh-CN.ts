@@ -1011,6 +1011,9 @@ export const zh_CN = {
     logEmpty: '这里还很安静，说点什么吧。',
     action: '{nick} {text}',
     composerPlaceholder: '发送到 {channel}（Enter 发送，Shift+Enter 换行）',
+    // Phones get a one-line placeholder: the long hint wraps and gets clipped
+    // by the single-row composer.
+    composerPlaceholderShort: '发送到 {channel}',
     send: '发送',
     jumpToLatest: '回到最新',
     errors: {
