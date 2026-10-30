@@ -45,7 +45,10 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('$lib/app-info', () => ({ loadAppVersion: mocks.loadAppVersion }));
+vi.mock('$lib/app-info', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('$lib/app-info')>()),
+  loadAppVersion: mocks.loadAppVersion,
+}));
 vi.mock('$lib/api', async (importOriginal) => ({
   ...await importOriginal<typeof import('$lib/api')>(),
   protocolVersion: mocks.protocolVersion,
@@ -88,6 +91,16 @@ afterEach(() => {
 });
 
 describe('about page', () => {
+  it('shows the product name of the running build instead of a fixed one', async () => {
+    const { appName } = await import('$lib/app-info');
+    appName.set('CFMS Modded');
+
+    render(AboutPage);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'CFMS Modded' })).toBeTruthy();
+    appName.set('CFMS Client');
+  });
+
   it('renders the product identity and passes one shared version read to update context', async () => {
     const { container } = render(AboutPage);
 

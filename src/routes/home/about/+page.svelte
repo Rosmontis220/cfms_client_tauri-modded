@@ -7,7 +7,7 @@
     setProtocolVersionOverride,
     type ProtocolVersionSettings,
   } from '$lib/api';
-  import { loadAppVersion } from '$lib/app-info';
+  import { appName, loadAppVersion } from '$lib/app-info';
   import { releaseHighlightsState } from '$lib/release-highlights/state.svelte';
   import { authStore } from '$lib/stores.svelte';
   import AppUpdateChecker from '$lib/components/AppUpdateChecker.svelte';
@@ -85,7 +85,7 @@
 
 <div class="workspace-page about-page">
   <header class="product-heading">
-    <h2>CFMS Client</h2>
+    <h2>{$appName}</h2>
     <p>{$t('about.productName')}</p>
   </header>
 

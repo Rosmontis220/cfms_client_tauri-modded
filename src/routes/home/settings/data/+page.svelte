@@ -6,6 +6,7 @@
   import LocalDataResetDialog from '$lib/components/LocalDataResetDialog.svelte';
   import SettingsPageHeader from '$lib/components/SettingsPageHeader.svelte';
   import { notificationStore } from '$lib/stores.svelte';
+  import { appName } from '$lib/app-info';
 
   let dialogOpen = $state(false);
   let busy = $state(false);
@@ -29,7 +30,7 @@
 <div class="workspace-page settings-page-shell">
   <SettingsPageHeader
     title={$t('settings.localData.title')}
-    description={$t('settings.localData.description')}
+    description={$t('settings.localData.description', { values: { app: $appName } })}
     icon="backup"
   />
 

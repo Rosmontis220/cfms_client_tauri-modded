@@ -23,6 +23,7 @@
   import { initFileAutoCheck, disposeFileAutoCheck } from "$lib/file-auto-check-events";
   import { initDesktopShell } from "$lib/desktop-shell";
   import { initI18n } from "$lib/i18n";
+  import { loadAppName } from "$lib/app-info";
   import { initNavigationHistory, navigateUp, parentRouteFor } from "$lib/navigation";
   import { isAccountProfileRoute, isPublicUtilityRoute as isPublicHomeRoute } from '$lib/public-utility-navigation';
   import { appUpdateState } from "$lib/app-update-state.svelte";
@@ -290,6 +291,9 @@
       if (resetStatus.pending) {
         resetRecoveryMode = true;
         await initI18n();
+        // The recovery page names the application too, and this branch returns
+        // before the regular startup path below resolves it.
+        await loadAppName();
         if (page.url.pathname !== '/reset') {
           await goto('/reset', { replaceState: true });
         }
@@ -300,6 +304,8 @@
     }
 
     await initI18n();
+    // Resolve the display name before the tray labels and dialogs are built.
+    await loadAppName();
     await appLockStore.refreshPlatformAvailability();
 
     // Initialize disclaimer check.

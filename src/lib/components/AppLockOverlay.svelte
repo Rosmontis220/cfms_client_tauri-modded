@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { _ as t } from 'svelte-i18n';
   import { appLockStore, isCredentialOperationCancelled } from '$lib/app-lock.svelte';
+  import { appName } from '$lib/app-info';
   import { disconnect, logout } from '$lib/api';
   import { authStore, notificationStore, serverStateStore } from '$lib/stores.svelte';
   import AppPinPad from '$lib/components/AppPinPad.svelte';
@@ -117,8 +118,8 @@
     status = $t('appLock.unlock.biometricPrompt');
     try {
       if (await appLockStore.verifyBiometric({
-        reason: $t('appLock.unlock.biometricReason'),
-        title: $t('appLock.unlock.biometricTitle'),
+        reason: $t('appLock.unlock.biometricReason', { values: { app: $appName } }),
+        title: $t('appLock.unlock.biometricTitle', { values: { app: $appName } }),
         subtitle: $t('appLock.unlock.biometricSubtitle'),
         cancelTitle: $t('common.cancel'),
         fallbackTitle: $t('appLock.unlock.biometricFallback'),

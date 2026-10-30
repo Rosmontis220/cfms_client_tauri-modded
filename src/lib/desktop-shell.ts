@@ -11,6 +11,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { get } from 'svelte/store';
 import { _ as t, locale } from 'svelte-i18n';
 import { dialogStore } from '$lib/dialogs.svelte';
+import { appName } from '$lib/app-info';
 import {
   dismissCloseRequest,
   resolveCloseRequest,
@@ -27,16 +28,20 @@ let unsubscribeLocale: (() => void) | null = null;
 /** One prompt at a time; a queued second click would fight the first. */
 let prompting = false;
 
-function translate(key: string): string {
-  return get(t)(key);
+function translate(key: string, values?: Record<string, string>): string {
+  const translateFn = get(t);
+  return values ? translateFn(key, { values }) : translateFn(key);
 }
 
 function readTrayLabels(): DesktopTrayLabels {
+  // Read `appName` per call: the tray is refreshed on locale changes too, and
+  // the name is resolved asynchronously during startup.
+  const app = get(appName);
   return {
     show: translate('closeRequest.trayShow'),
     hide: translate('closeRequest.trayHide'),
-    quit: translate('closeRequest.trayQuit'),
-    tooltip: translate('closeRequest.trayTooltip'),
+    quit: translate('closeRequest.trayQuit', { app }),
+    tooltip: translate('closeRequest.trayTooltip', { app }),
   };
 }
 
@@ -46,7 +51,7 @@ async function promptForClose(): Promise<void> {
   try {
     const answer = await dialogStore.choose<CloseRequestAnswer>({
       title: translate('closeRequest.title'),
-      message: translate('closeRequest.message'),
+      message: translate('closeRequest.message', { app: get(appName) }),
       cancelLabel: translate('common.cancel'),
       applyToAllLabel: translate('closeRequest.remember'),
       choices: [

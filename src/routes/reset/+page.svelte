@@ -11,6 +11,7 @@
   import DialogActionButton from '$lib/components/DialogActionButton.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import ProgressRing from '$lib/components/ProgressRing.svelte';
+  import { appName } from '$lib/app-info';
 
   let failures = $state<LocalDataResetFailure[]>([]);
   let loading = $state(true);
@@ -55,7 +56,7 @@
       </span>
       <div>
         <h1 class="text-xl font-bold text-md3-on-surface">{$t('settings.localData.recoveryTitle')}</h1>
-        <p class="mt-2 text-sm leading-6 text-md3-on-surface-variant">{$t('settings.localData.recoveryDescription')}</p>
+        <p class="mt-2 text-sm leading-6 text-md3-on-surface-variant">{$t('settings.localData.recoveryDescription', { values: { app: $appName } })}</p>
       </div>
 
       {#if loading}
