@@ -636,10 +636,7 @@ pub async fn upload_chat_record<R: Runtime>(
     } else {
         format!("{speaker_name}.txt")
     };
-    let temporary_file = tempfile::Builder::new()
-        .prefix("cfms-chat-record-")
-        .suffix(".txt")
-        .tempfile()
+    let temporary_file = crate::scratch::file(&app_handle, "cfms-chat-record-", ".txt")
         .map_err(|error| format!("Failed to create temporary chat record: {error}"))?;
     std::fs::write(temporary_file.path(), content.as_bytes())
         .map_err(|error| format!("Failed to write temporary chat record: {error}"))?;

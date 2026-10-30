@@ -18,6 +18,7 @@ mod migration;
 mod localization;
 mod preference_keys;
 mod public_key_auth;
+mod scratch;
 mod secure_store;
 mod mobile_keepalive;
 mod window_backdrop;
