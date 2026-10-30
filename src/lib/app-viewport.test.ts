@@ -102,4 +102,46 @@ describe('installAppViewport', () => {
     expect(heightVar()).toBe('');
     dispose();
   });
+
+  it('shrinks the shell when the Android host reports an IME inset', () => {
+    const dispose = installAppViewport();
+    window.__cfmsSetKeyboardInset?.(600);
+    expect(heightVar()).toBe('200px');
+    expect(insetVar()).toBe('600px');
+
+    window.__cfmsSetKeyboardInset?.(0);
+    expect(heightVar()).toBe('800px');
+    expect(insetVar()).toBe('0px');
+    dispose();
+  });
+
+  it('works from the host inset alone, with no visual viewport', () => {
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: undefined });
+    const dispose = installAppViewport();
+    window.__cfmsSetKeyboardInset?.(450);
+    expect(heightVar()).toBe('350px');
+    expect(insetVar()).toBe('450px');
+    dispose();
+  });
+
+  it('keeps the larger of the host inset and the visual viewport shrink', () => {
+    const dispose = installAppViewport();
+    window.__cfmsSetKeyboardInset?.(200);
+    viewport.height = 300;
+    viewport.emit('resize');
+    expect(heightVar()).toBe('300px');
+    expect(insetVar()).toBe('500px');
+
+    viewport.height = 100;
+    viewport.emit('resize');
+    expect(heightVar()).toBe('100px');
+    expect(insetVar()).toBe('700px');
+    dispose();
+  });
+
+  it('stops accepting host insets once disposed', () => {
+    const dispose = installAppViewport();
+    dispose();
+    expect(window.__cfmsSetKeyboardInset).toBeUndefined();
+  });
 });

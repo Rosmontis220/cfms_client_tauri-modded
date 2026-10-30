@@ -1404,6 +1404,7 @@
     height: 100%;
     min-height: 0;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .chat-header {
@@ -2178,17 +2179,26 @@
     }
 
     .chat-body {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      min-height: 0;
+      flex: 1;
+      grid-template-columns: minmax(0, 1fr);
+      /* A max-content first row keeps the horizontal room strip at its natural
+         height instead of clipping the cards, and the transcript absorbs every
+         remaining pixel so the page fills the phone screen. */
+      grid-template-rows: max-content minmax(0, 1fr);
       gap: 8px;
       padding: 0 14px 12px;
     }
 
     .chat-rooms {
-      flex: none;
       overflow-x: auto;
       overflow-y: hidden;
       padding: 6px;
+    }
+
+    .chat-view {
+      min-height: 0;
     }
 
     .chat-room-list {

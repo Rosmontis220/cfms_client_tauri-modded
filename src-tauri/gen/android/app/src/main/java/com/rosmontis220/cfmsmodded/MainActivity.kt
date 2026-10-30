@@ -6,9 +6,12 @@ import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
 
@@ -35,6 +38,28 @@ class MainActivity : TauriActivity() {
         // The foreground service requires a visible notification; without
         // permission the notification is silently hidden.
         requestNotificationPermission()
+    }
+
+    /**
+     * Forwards the on-screen keyboard height to the page.
+     *
+     * `enableEdgeToEdge()` keeps the activity at full height when the IME opens,
+     * so the web layout never shrinks and composers pinned to the bottom of a
+     * full-height column end up underneath the keyboard. The page owns the
+     * keyboard-aware layout ($lib/app-viewport); it only needs the inset.
+     */
+    override fun onWebViewCreate(webView: WebView) {
+        super.onWebViewCreate(webView)
+
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+            val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            webView.evaluateJavascript(
+                "window.__cfmsSetKeyboardInset && window.__cfmsSetKeyboardInset($imeBottom)",
+                null
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(window.decorView)
     }
 
     /**
