@@ -71,9 +71,11 @@ class MainActivity : TauriActivity() {
      */
     private fun resizeAboveKeyboard(view: View, imeBottom: Int) {
         val layoutParams = view.layoutParams ?: return
-        val target = if (imeBottom > 0) {
-            val host = (view.parent as? View)?.height?.takeIf { it > 0 } ?: view.rootView.height
-            (host - imeBottom).coerceAtLeast(1)
+        val host = (view.parent as? View)?.height?.takeIf { it > 0 } ?: view.rootView.height
+        // A host that has not been laid out yet (or is smaller than the IME)
+        // would collapse the page to a sliver; fall back to filling it.
+        val target = if (imeBottom > 0 && host > imeBottom) {
+            host - imeBottom
         } else {
             ViewGroup.LayoutParams.MATCH_PARENT
         }
