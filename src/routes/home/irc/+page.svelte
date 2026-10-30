@@ -822,7 +822,7 @@
 
   /* The on-screen keyboard already halves the window; the desktop title block
      would then push the transcript and the composer out of sight. */
-  @media (max-width: 700px) and (max-height: 560px) {
+  @media (max-width: 700px) and (max-height: 640px) {
     .irc-page { gap: 8px; padding: 8px 8px max(8px, var(--safe-area-bottom)); }
     .irc-header { display: none; }
     .irc-room-header { padding: 6px 10px; }

@@ -2268,7 +2268,7 @@
   /* The on-screen keyboard halves the window: at that size the speaker
      settings, the hint and the attachment list leave the transcript a few
      pixels tall, so only the field being typed into keeps its space. */
-  @media (max-width: 820px) and (max-height: 560px) {
+  @media (max-width: 700px) and (max-height: 640px) {
     .chat-header,
     .chat-mode-hint,
     .chat-error,
