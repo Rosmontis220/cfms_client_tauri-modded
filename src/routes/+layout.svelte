@@ -22,9 +22,9 @@
   import { initEventListeners } from "$lib/events";
   import { initFileAutoCheck, disposeFileAutoCheck } from "$lib/file-auto-check-events";
   import { initDesktopShell } from "$lib/desktop-shell";
+  import { installAppViewport } from "$lib/app-viewport";
   import { initI18n } from "$lib/i18n";
   import { loadAppName } from "$lib/app-info";
-  import { installAppViewport } from "$lib/app-viewport";
   import { initNavigationHistory, navigateUp, parentRouteFor } from "$lib/navigation";
   import { isAccountProfileRoute, isPublicUtilityRoute as isPublicHomeRoute } from '$lib/public-utility-navigation';
   import { appUpdateState } from "$lib/app-update-state.svelte";
