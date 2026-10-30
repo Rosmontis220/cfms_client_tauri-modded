@@ -6,14 +6,8 @@ import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.WebView
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
 
@@ -28,8 +22,19 @@ class MainActivity : TauriActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* granted or denied */ }
 
+    /**
+     * Sets up the foreground-service notification channel and its permission.
+     *
+     * Keyboard handling lives entirely in the manifest (`adjustResize`): the
+     * platform shrinks the window when the IME opens and Chromium relays the new
+     * size to the document, so `window.innerHeight`, `100%` heights and
+     * `visualViewport` all follow the visible area again.
+     *
+     * Do not call `enableEdgeToEdge()` here: it pulls the page underneath the
+     * status bar because Android WebView reports `env(safe-area-inset-*)` as 0,
+     * which silently removes the system-bar avoidance.
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         // Create the notification channel required for the foreground service.
@@ -40,49 +45,6 @@ class MainActivity : TauriActivity() {
         // The foreground service requires a visible notification; without
         // permission the notification is silently hidden.
         requestNotificationPermission()
-    }
-
-    /**
-     * Keeps the page above the on-screen keyboard.
-     *
-     * `enableEdgeToEdge()` stops the window from resizing when the IME opens, so
-     * the document keeps the full screen height and composers pinned to the
-     * bottom of a full-height column end up underneath the keyboard. The window
-     * insets still report the IME, so the WebView is shrunk by that amount.
-     */
-    override fun onWebViewCreate(webView: WebView) {
-        super.onWebViewCreate(webView)
-
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
-            resizeAboveKeyboard(view, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
-            insets
-        }
-        ViewCompat.requestApplyInsets(webView)
-    }
-
-    /**
-     * Shrinks the WebView by the height of the on-screen keyboard.
-     *
-     * Shrinking the view is what makes the page notice: Chromium relays the new
-     * size to the document, so `window.innerHeight`, `100%` heights and
-     * `visualViewport` all follow the visible area again. Pushing the inset into
-     * the page with JavaScript cannot work here because the document has no way
-     * to grow the window back when the keyboard closes.
-     */
-    private fun resizeAboveKeyboard(view: View, imeBottom: Int) {
-        val layoutParams = view.layoutParams ?: return
-        val host = (view.parent as? View)?.height?.takeIf { it > 0 } ?: view.rootView.height
-        // A host that has not been laid out yet (or is smaller than the IME)
-        // would collapse the page to a sliver; fall back to filling it.
-        val target = if (imeBottom > 0 && host > imeBottom) {
-            host - imeBottom
-        } else {
-            ViewGroup.LayoutParams.MATCH_PARENT
-        }
-        if (layoutParams.height != target) {
-            layoutParams.height = target
-            view.layoutParams = layoutParams
-        }
     }
 
     /**
