@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,25 +43,44 @@ class MainActivity : TauriActivity() {
     }
 
     /**
-     * Forwards the on-screen keyboard height to the page.
+     * Keeps the page above the on-screen keyboard.
      *
-     * `enableEdgeToEdge()` keeps the activity at full height when the IME opens,
-     * so the web layout never shrinks and composers pinned to the bottom of a
-     * full-height column end up underneath the keyboard. The page owns the
-     * keyboard-aware layout ($lib/app-viewport); it only needs the inset.
+     * `enableEdgeToEdge()` stops the window from resizing when the IME opens, so
+     * the document keeps the full screen height and composers pinned to the
+     * bottom of a full-height column end up underneath the keyboard. The window
+     * insets still report the IME, so the WebView is shrunk by that amount.
      */
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
 
-        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
-            val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            webView.evaluateJavascript(
-                "window.__cfmsSetKeyboardInset && window.__cfmsSetKeyboardInset($imeBottom)",
-                null
-            )
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+            resizeAboveKeyboard(view, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
             insets
         }
-        ViewCompat.requestApplyInsets(window.decorView)
+        ViewCompat.requestApplyInsets(webView)
+    }
+
+    /**
+     * Shrinks the WebView by the height of the on-screen keyboard.
+     *
+     * Shrinking the view is what makes the page notice: Chromium relays the new
+     * size to the document, so `window.innerHeight`, `100%` heights and
+     * `visualViewport` all follow the visible area again. Pushing the inset into
+     * the page with JavaScript cannot work here because the document has no way
+     * to grow the window back when the keyboard closes.
+     */
+    private fun resizeAboveKeyboard(view: View, imeBottom: Int) {
+        val layoutParams = view.layoutParams ?: return
+        val target = if (imeBottom > 0) {
+            val host = (view.parent as? View)?.height?.takeIf { it > 0 } ?: view.rootView.height
+            (host - imeBottom).coerceAtLeast(1)
+        } else {
+            ViewGroup.LayoutParams.MATCH_PARENT
+        }
+        if (layoutParams.height != target) {
+            layoutParams.height = target
+            view.layoutParams = layoutParams
+        }
     }
 
     /**

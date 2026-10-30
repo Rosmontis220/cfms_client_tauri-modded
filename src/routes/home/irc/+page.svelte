@@ -800,7 +800,9 @@
   /* Phones: reclaim the vertical space the desktop title block eats, and keep
      the composer to a single comfortable row. */
   @media (max-width: 700px) {
-    .irc-page { gap: 10px; padding: 12px; }
+    /* Leave the gesture bar its row: the composer is the last thing on the
+       page and used to be drawn underneath it. */
+    .irc-page { gap: 10px; padding: 12px 12px max(12px, var(--safe-area-bottom)); }
     .irc-header { flex-wrap: wrap; align-items: center; gap: 8px; }
     .irc-page :global(.cfms-heading-copy h1) { font-size: 22px; line-height: 28px; }
     .irc-page :global(.cfms-heading-copy p) { font-size: 12px; line-height: 18px; }
@@ -816,5 +818,16 @@
        through aria-label. */
     .irc-composer { gap: 6px; }
     .irc-send-label { display: none; }
+  }
+
+  /* The on-screen keyboard already halves the window; the desktop title block
+     would then push the transcript and the composer out of sight. */
+  @media (max-width: 700px) and (max-height: 560px) {
+    .irc-page { gap: 8px; padding: 8px 8px max(8px, var(--safe-area-bottom)); }
+    .irc-header { display: none; }
+    .irc-room-header { padding: 6px 10px; }
+    .irc-messages { padding: 6px 8px; }
+    .irc-composer { padding: 6px 8px; }
+    .irc-composer-field textarea { max-height: 84px; }
   }
 </style>

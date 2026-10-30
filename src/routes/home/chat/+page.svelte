@@ -645,6 +645,16 @@
     if (room && !room.loaded) void loadRoomDetails(roomId);
   }
 
+  // Opening the page auto-selects the newest room; fetch its records right away
+  // so the transcript is not reported as empty until the card is tapped again.
+  $effect(() => {
+    const roomId = selectedRoomId;
+    if (!roomId) return;
+    const room = rooms.find((item) => item.roomId === roomId);
+    if (!room || room.loaded || loadingRoomId === roomId) return;
+    void untrack(() => loadRoomDetails(roomId));
+  });
+
   function resetComposer() {
     composeMessage = '';
     replyTarget = null;
@@ -2188,7 +2198,7 @@
          remaining pixel so the page fills the phone screen. */
       grid-template-rows: max-content minmax(0, 1fr);
       gap: 8px;
-      padding: 0 14px 12px;
+      padding: 0 14px max(12px, var(--safe-area-bottom));
     }
 
     .chat-rooms {
@@ -2252,6 +2262,46 @@
 
     .chat-attachments {
       padding: 8px 12px;
+    }
+  }
+
+  /* The on-screen keyboard halves the window: at that size the speaker
+     settings, the hint and the attachment list leave the transcript a few
+     pixels tall, so only the field being typed into keeps its space. */
+  @media (max-width: 820px) and (max-height: 560px) {
+    .chat-header,
+    .chat-mode-hint,
+    .chat-error,
+    .chat-rooms,
+    .chat-composer-settings,
+    .chat-compose-hint,
+    .chat-attachments {
+      display: none;
+    }
+
+    .chat-body {
+      padding: 0 10px max(8px, var(--safe-area-bottom));
+    }
+
+    .chat-view-header {
+      padding: 6px 10px;
+    }
+
+    .chat-messages {
+      padding: 8px 10px;
+    }
+
+    .chat-state {
+      min-height: 60px;
+    }
+
+    .chat-composer {
+      gap: 4px;
+      padding: 6px 10px;
+    }
+
+    .chat-compose-entry textarea {
+      min-height: 44px;
     }
   }
 </style>

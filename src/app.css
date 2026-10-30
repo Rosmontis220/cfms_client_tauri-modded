@@ -222,6 +222,10 @@ html[data-theme="light"] { color-scheme: light; }
   overflow: hidden;
   padding-left: var(--safe-area-left);
   padding-right: var(--safe-area-right);
+  /* Without this the last row of a full-height page (a composer, an
+     attachment footer) is drawn under the gesture bar on edge-to-edge
+     phones. */
+  padding-bottom: var(--safe-area-bottom);
 }
 
 .safe-area-top {
