@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
@@ -23,8 +22,19 @@ class MainActivity : TauriActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* granted or denied */ }
 
+    /**
+     * Sets up the foreground-service notification channel and its permission.
+     *
+     * Keyboard handling lives entirely in the manifest (`adjustResize`): the
+     * platform shrinks the window when the IME opens and Chromium relays the new
+     * size to the document, so `window.innerHeight`, `100%` heights and
+     * `visualViewport` all follow the visible area again.
+     *
+     * Do not call `enableEdgeToEdge()` here: it pulls the page underneath the
+     * status bar because Android WebView reports `env(safe-area-inset-*)` as 0,
+     * which silently removes the system-bar avoidance.
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         // Create the notification channel required for the foreground service.

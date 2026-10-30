@@ -5,6 +5,7 @@
 // that reads the registry. Start-up hooks run in this order.
 
 import type { CustomModule } from '../types';
+import { appViewport } from './app-viewport';
 import { customMessages } from './custom-messages';
 import { notificationsCenter } from './notifications';
 import { chat } from './chat';
@@ -16,6 +17,7 @@ import { extensions } from './extensions/contribution';
 
 export const CUSTOM_MODULES: readonly CustomModule[] = [
   customMessages,
+  appViewport,
   notificationsCenter,
   chat,
   tools,

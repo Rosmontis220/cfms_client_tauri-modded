@@ -204,11 +204,11 @@ pub fn scan_local_chatbox(dir: String) -> Result<Vec<LocalChatboxRoom>, String> 
 /// bytes as UTF-8 (lossy). The temporary file is removed before returning.
 #[tauri::command]
 pub async fn read_server_document(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppHandleState>,
     document_id: String,
 ) -> Result<ServerTextFile, String> {
-    let temp_dir = tempfile::tempdir()
-        .map_err(|e| format!("Failed to create temporary directory: {e}"))?;
+    let temp_dir = crate::scratch::dir(&app, "cfms-read-")?;
     let dest = temp_dir.path().join("chat.txt");
     download_document_to(&state, &document_id, &dest).await?;
 
