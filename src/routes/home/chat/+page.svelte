@@ -645,6 +645,16 @@
     if (room && !room.loaded) void loadRoomDetails(roomId);
   }
 
+  // Opening the page auto-selects the newest room; fetch its records right away
+  // so the transcript is not reported as empty until the card is tapped again.
+  $effect(() => {
+    const roomId = selectedRoomId;
+    if (!roomId) return;
+    const room = rooms.find((item) => item.roomId === roomId);
+    if (!room || room.loaded || loadingRoomId === roomId) return;
+    void untrack(() => loadRoomDetails(roomId));
+  });
+
   function resetComposer() {
     composeMessage = '';
     replyTarget = null;
@@ -1404,10 +1414,12 @@
     height: 100%;
     min-height: 0;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .chat-header {
     display: flex;
+    flex: none;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
@@ -2140,10 +2152,156 @@
     background: var(--colorNeutralBackground1Hover);
   }
 
+  /* Phones and narrow windows: the two-column desktop grid leaves the record
+     list a few dozen pixels tall and squeezes the message area, so the room
+     list becomes a horizontal strip and the transcript keeps the rest of the
+     screen. */
   @media (max-width: 820px) {
+    .chat-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 12px 14px 6px;
+    }
+
+    .chat-header-text h1 {
+      font-size: 18px;
+      line-height: 24px;
+    }
+
+    .chat-header-text p {
+      margin-top: 2px;
+      font-size: 12px;
+      line-height: 16px;
+    }
+
+    .chat-header-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chat-mode-hint {
+      margin: 0 14px 8px;
+    }
+
+    .chat-error {
+      margin: 0 14px 8px;
+    }
+
     .chat-body {
-      grid-template-columns: 1fr;
-      grid-template-rows: minmax(160px, 34%) minmax(0, 1fr);
+      display: grid;
+      min-height: 0;
+      flex: 1;
+      grid-template-columns: minmax(0, 1fr);
+      /* An auto first row keeps the horizontal room strip at its natural
+         height instead of clipping the cards, and the transcript absorbs every
+         remaining pixel so the page fills the phone screen. */
+      grid-template-rows: max-content minmax(0, 1fr);
+      gap: 8px;
+      padding: 0 14px max(12px, var(--safe-area-bottom));
+    }
+
+    .chat-rooms {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 6px;
+    }
+
+    .chat-view {
+      min-height: 0;
+    }
+
+    .chat-room-list {
+      display: flex;
+      gap: 6px;
+    }
+
+    .chat-room-card {
+      flex: none;
+      width: 168px;
+    }
+
+    .chat-room-rename {
+      display: grid;
+    }
+
+    .chat-state {
+      min-height: 120px;
+    }
+
+    .chat-view-header {
+      padding: 8px 12px;
+    }
+
+    .chat-messages {
+      padding: 10px 12px;
+    }
+
+    .chat-composer {
+      gap: 6px;
+      padding: 8px 12px;
+    }
+
+    .chat-composer-settings {
+      gap: 8px;
+    }
+
+    .chat-composer-name {
+      width: 100%;
+    }
+
+    .chat-compose-entry {
+      gap: 6px;
+    }
+
+    .chat-compose-hint {
+      margin: 0;
+      font-size: 10px;
+      line-height: 14px;
+    }
+
+    .chat-attachments {
+      padding: 8px 12px;
+    }
+  }
+
+  /* The on-screen keyboard halves the window: at that size the speaker
+     settings, the hint and the attachment list leave the transcript a few
+     pixels tall, so only the field being typed into keeps its space. */
+  @media (max-width: 700px) and (max-height: 640px) {
+    .chat-header,
+    .chat-mode-hint,
+    .chat-error,
+    .chat-rooms,
+    .chat-composer-settings,
+    .chat-compose-hint,
+    .chat-attachments {
+      display: none;
+    }
+
+    .chat-body {
+      padding: 0 10px max(8px, var(--safe-area-bottom));
+    }
+
+    .chat-view-header {
+      padding: 6px 10px;
+    }
+
+    .chat-messages {
+      padding: 8px 10px;
+    }
+
+    .chat-state {
+      min-height: 60px;
+    }
+
+    .chat-composer {
+      gap: 4px;
+      padding: 6px 10px;
+    }
+
+    .chat-compose-entry textarea {
+      min-height: 44px;
     }
   }
 </style>

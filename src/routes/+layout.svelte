@@ -22,6 +22,7 @@
   import { initEventListeners } from "$lib/events";
   import { initFileAutoCheck, disposeFileAutoCheck } from "$lib/file-auto-check-events";
   import { initDesktopShell } from "$lib/desktop-shell";
+  import { installAppViewport } from "$lib/app-viewport";
   import { initI18n } from "$lib/i18n";
   import { initNavigationHistory, navigateUp, parentRouteFor } from "$lib/navigation";
   import { isAccountProfileRoute, isPublicUtilityRoute as isPublicHomeRoute } from '$lib/public-utility-navigation';
@@ -358,6 +359,12 @@
         }
       }, 2000);
     }
+  });
+
+  onMount(() => {
+    // Shrink the shell with the on-screen keyboard so bottom composers stay visible.
+    const disposeAppViewport = installAppViewport();
+    return disposeAppViewport;
   });
 
   onMount(() => {
