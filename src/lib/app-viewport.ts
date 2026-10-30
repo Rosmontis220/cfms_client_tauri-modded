@@ -1,14 +1,14 @@
 // Keeps the application shell the same size as the *visible* area.
 //
-// On Android the activity runs edge-to-edge, so the window does not resize when
-// the on-screen keyboard opens: `window.innerHeight` (and therefore
-// `height: 100%`) keeps the full height and any composer pinned to the bottom of
-// a full-height column ends up underneath the keyboard. Two sources tell us how
-// much is covered, and we take the larger of them:
+// Android declares `adjustResize`, so the platform shrinks the window when the
+// on-screen keyboard opens and Chromium relays the new size to the document:
+// `window.innerHeight` (and therefore `height: 100%`) and `visualViewport` all
+// follow the visible area. Two sources can still report a covered band, and we
+// take the larger of them:
 //
 //   1. `window.visualViewport` — accurate wherever the browser shrinks it.
-//   2. `window.__cfmsSetKeyboardInset()` — pushed from `MainActivity` with the
-//      IME WindowInset, which is the only signal that works under edge-to-edge.
+//   2. `window.__cfmsSetKeyboardInset()` — an escape hatch for a host that
+//      renders edge-to-edge, where the window does not resize at all.
 //
 // `--app-viewport-height` — height the shell should occupy.
 // `--keyboard-inset`      — how much of the window is hidden by the keyboard.
