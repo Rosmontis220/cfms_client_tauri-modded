@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { _ as t } from 'svelte-i18n';
-  import FluentButton from '$lib/components/FluentButton.svelte';
-  import Icon from '$lib/components/Icon.svelte';
-  import MdOutlinedField from '$lib/components/MdOutlinedField.svelte';
-  import PageHeading from '$lib/components/PageHeading.svelte';
+  import FluentButton from '$lib/shared/ui/FluentButton.svelte';
+  import Icon from '$lib/shared/ui/Icon.svelte';
+  import MdOutlinedField from '$lib/shared/ui/MdOutlinedField.svelte';
+  import PageHeading from '$lib/shared/ui/PageHeading.svelte';
   import { ircStore, startIrcEvents, type IrcLine } from '$lib/irc/store.svelte';
   import { formatIrcClock, memberRank, nickColorIndex, stripIrcFormatting } from '$lib/irc/format';
   import { isScrolledToBottom } from '$lib/scroll-edges';

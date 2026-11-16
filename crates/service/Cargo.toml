@@ -6,6 +6,12 @@ license.workspace = true
 repository.workspace = true
 description = "CFMS background services, persistent state, and local filesystem scanning"
 
+# The extension packaging tool lives at a fork-owned path; the binary keeps its
+# upstream name so documented commands keep working.
+[[bin]]
+name = "cfms-extension"
+path = "src/bin/custom-extension.rs"
+
 [dependencies]
 cfms-core.workspace = true
 cfms-crypto.workspace = true
@@ -20,10 +26,12 @@ sha2.workspace = true
 ed25519-dalek.workspace = true
 zip.workspace = true
 semver.workspace = true
+wasmi.workspace = true
 zeroize.workspace = true
 base64ct.workspace = true
 ignore = "0.4"
 tracing.workspace = true
+tempfile.workspace = true
 hex = "0.4.3"
 ssh-key = { version = "=0.7.0-rc.11", features = ["encryption"] }
 signature = "2"
@@ -34,4 +42,9 @@ p521 = { version = "0.14", features = ["ecdsa"] }
 sha2-legacy = { package = "sha2", version = "0.10", features = ["oid"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
+wat = "1"
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+rustls.workspace = true

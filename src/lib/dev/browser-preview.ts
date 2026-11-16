@@ -29,6 +29,10 @@ import type {
   ServerState,
   UserPreference,
 } from '$lib/api';
+import {
+  DECLARATIVE_HOST_API_VERSION,
+  WASM_HOST_API_VERSION,
+} from '$lib/injection/modules/extensions/api';
 import { authStore, serverStateStore } from '$lib/stores.svelte';
 
 type MockArgs = Record<string, unknown>;
@@ -188,14 +192,17 @@ const CONNECTION_SETTINGS: ConnectionSettings = {
   client_key_path: '',
   remember_connection_addresses: true,
   recent_connection_addresses: [SERVER_ADDRESS],
+  crl_allowed_hosts: [],
 };
 
 const EXTENSION_OVERVIEW: ExtensionOverview = {
   installed: [],
   accountStates: {},
+  schedules: {},
   catalog: null,
   trustedKeysConfigured: false,
   hostApiVersion: APP_VERSION,
+  supportedHostApiVersions: [DECLARATIVE_HOST_API_VERSION, WASM_HOST_API_VERSION],
 };
 
 /** Device settings the UI reads back after writing (e.g. the disclaimer flag). */
@@ -220,11 +227,10 @@ function mockUserPreference(): UserPreference {
     file_auto_update_auto_download: false,
     file_auto_detect_on_startup: false,
     sync_git_tracking_enabled: false,
-    sync_overwrite_strategy: 'fail',
+    sync_overwrite_strategy: 'backup_rename',
     privacy: { version: 1, screenshot_protection_enabled: false },
     task_concurrency: { max_downloads: 3, max_uploads: 3 },
     transfer: { max_download_chunk_size: 1_048_576 },
-    extensions: {},
   };
 }
 

@@ -6,270 +6,30 @@
 #![allow(clippy::items_after_test_module)]
 #![allow(clippy::too_many_arguments)] // Tauri command signatures mirror the IPC contract.
 
+mod app_state;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod background;
+mod bootstrap;
 mod commands;
-mod file_auto_check;
-mod desktop_shell;
+mod custom;
+pub use app_state::{AppHandleState, ConnectAttemptRegistry};
 mod github_credentials;
-mod irc;
 mod local_data_reset;
-mod migration;
+mod irc;
 mod localization;
 mod preference_keys;
 mod public_key_auth;
 mod scratch;
 mod secure_store;
-mod mobile_keepalive;
 mod window_backdrop;
 
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
-};
-
+#[cfg(target_os = "android")]
+use tauri::Manager;
 #[cfg(target_os = "android")]
 use tauri::Runtime;
-use tauri::{Emitter, Manager};
-use tauri_plugin_log::log::LevelFilter;
-use tauri_plugin_log::{Target, TargetKind};
-use tokio::sync::watch;
 
-use cfms_service::db::settings::SettingsStore;
-use cfms_service::extensions::ExtensionStore;
-use cfms_service::service::manager::ServiceManager;
-use cfms_service::services::download_queue::{ActiveRegistry, QueueState};
-use cfms_service::services::upload_queue::UploadQueueState;
-use cfms_service::state::AppState;
-use localization::LocalizationManager;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UploadInterruption {
-    Paused,
-    Cancelled,
-}
-
-struct ActiveUpload {
-    control_tx: watch::Sender<Option<UploadInterruption>>,
-    transfer_conn: Option<cfms_transport::Connection>,
-}
-
-#[derive(Clone, Default)]
-pub struct ActiveUploadRegistry {
-    inner: Arc<Mutex<HashMap<String, ActiveUpload>>>,
-}
-
-impl ActiveUploadRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn register(&self, upload_id: &str) -> watch::Receiver<Option<UploadInterruption>> {
-        let (control_tx, control_rx) = watch::channel(None);
-        let mut map = self.inner.lock().unwrap();
-        map.insert(
-            upload_id.to_string(),
-            ActiveUpload {
-                control_tx,
-                transfer_conn: None,
-            },
-        );
-        control_rx
-    }
-
-    pub fn set_transfer_conn(&self, upload_id: &str, conn: cfms_transport::Connection) {
-        let mut map = self.inner.lock().unwrap();
-        if let Some(active) = map.get_mut(upload_id) {
-            active.transfer_conn = Some(conn);
-        }
-    }
-
-    pub fn clear_transfer_conn(&self, upload_id: &str) {
-        let mut map = self.inner.lock().unwrap();
-        if let Some(active) = map.get_mut(upload_id) {
-            active.transfer_conn = None;
-        }
-    }
-
-    pub fn resume(&self, upload_id: &str) -> bool {
-        let map = self.inner.lock().unwrap();
-        let Some(active) = map.get(upload_id) else {
-            return false;
-        };
-        let is_paused = *active.control_tx.borrow() == Some(UploadInterruption::Paused);
-        if !is_paused {
-            return false;
-        }
-        active.control_tx.send(None).is_ok()
-    }
-
-    pub fn unregister(&self, upload_id: &str) {
-        let mut map = self.inner.lock().unwrap();
-        map.remove(upload_id);
-    }
-
-    pub fn interrupt(&self, upload_id: &str, reason: UploadInterruption) -> bool {
-        let mut map = self.inner.lock().unwrap();
-        if let Some(active) = map.get_mut(upload_id) {
-            let _ = active.control_tx.send(Some(reason));
-            if let Some(conn) = active.transfer_conn.take() {
-                tauri::async_runtime::spawn(async move { conn.close().await });
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn interrupt_all(&self, reason: UploadInterruption) {
-        let mut map = self.inner.lock().unwrap();
-        for active in map.values_mut() {
-            let _ = active.control_tx.send(Some(reason));
-            if let Some(conn) = active.transfer_conn.take() {
-                tauri::async_runtime::spawn(async move { conn.close().await });
-            }
-        }
-    }
-}
-
-struct ActiveConnectAttempt {
-    id: u64,
-    control_tx: watch::Sender<bool>,
-}
-
-/// Coordinates the single connection attempt allowed to run at a time.
-///
-/// A monotonically increasing id prevents a superseded attempt from storing
-/// its connection after a newer attempt has started or cancellation won the
-/// completion race.
-#[derive(Clone, Default)]
-pub struct ConnectAttemptRegistry {
-    inner: Arc<Mutex<Option<ActiveConnectAttempt>>>,
-    next_id: Arc<AtomicU64>,
-}
-
-impl ConnectAttemptRegistry {
-    pub fn register(&self) -> (u64, watch::Receiver<bool>) {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        let (control_tx, control_rx) = watch::channel(false);
-        let mut active = self.inner.lock().unwrap();
-        if let Some(previous) = active.replace(ActiveConnectAttempt { id, control_tx }) {
-            let _ = previous.control_tx.send(true);
-        }
-        (id, control_rx)
-    }
-
-    pub fn cancel(&self) -> bool {
-        let active = self.inner.lock().unwrap();
-        active
-            .as_ref()
-            .is_some_and(|attempt| attempt.control_tx.send(true).is_ok())
-    }
-
-    pub fn claim_completion(&self, id: u64) -> bool {
-        let mut active = self.inner.lock().unwrap();
-        let can_complete = active
-            .as_ref()
-            .is_some_and(|attempt| attempt.id == id && !*attempt.control_tx.borrow());
-        if can_complete {
-            active.take();
-        }
-        can_complete
-    }
-
-    pub fn unregister(&self, id: u64) {
-        let mut active = self.inner.lock().unwrap();
-        if active.as_ref().is_some_and(|attempt| attempt.id == id) {
-            active.take();
-        }
-    }
-}
-
-#[cfg(test)]
-mod connect_attempt_registry_tests {
-    use super::ConnectAttemptRegistry;
-
-    #[test]
-    fn cancellation_signals_the_attempt_and_blocks_completion() {
-        let registry = ConnectAttemptRegistry::default();
-        let (id, cancel_rx) = registry.register();
-
-        assert!(registry.cancel());
-        assert!(*cancel_rx.borrow());
-        assert!(!registry.claim_completion(id));
-
-        registry.unregister(id);
-        assert!(!registry.cancel());
-    }
-
-    #[test]
-    fn a_new_attempt_supersedes_the_previous_one() {
-        let registry = ConnectAttemptRegistry::default();
-        let (first_id, first_cancel_rx) = registry.register();
-        let (second_id, second_cancel_rx) = registry.register();
-
-        assert!(*first_cancel_rx.borrow());
-        assert!(!*second_cancel_rx.borrow());
-        assert!(!registry.claim_completion(first_id));
-        assert!(registry.claim_completion(second_id));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tauri managed state
-// ---------------------------------------------------------------------------
-
-/// The shared application state managed by Tauri and accessible from every
-/// `#[tauri::command]` via `tauri::State<'_, AppHandleState>`.
-pub struct AppHandleState {
-    pub public_keys: Arc<public_key_auth::PublicKeyState>,
-    /// Shared in-memory application state (auth, DEK, lockdown, events).
-    pub inner: Arc<AppState>,
-
-    /// In-memory download task queue.  Tasks are persisted to encrypted JSON
-    /// files per-user (see `cfms_service::services::task_persistence`).
-    pub tasks: QueueState,
-
-    /// Encrypted per-user upload task metadata and recovery records.
-    pub upload_tasks: UploadQueueState,
-
-    /// User settings (key-value, SQLite-backed).
-    pub settings: SettingsStore,
-
-    /// Device-global signed extension packages and catalog metadata.
-    pub extensions: ExtensionStore,
-
-    /// Registry of active downloads (cancellation flags).
-    pub active_downloads: ActiveRegistry,
-
-    /// Registry of active uploads (pause/cancel flags).
-    pub active_uploads: ActiveUploadRegistry,
-
-    /// Cancellation state for the connection currently being established.
-    pub connect_attempts: ConnectAttemptRegistry,
-
-    /// Backend localization state (Fluent-backed).
-    pub localizer: Arc<LocalizationManager>,
-
-    /// Pending application update selected by the most recent updater check.
-    pub pending_update: Arc<Mutex<Option<tauri_plugin_updater::Update>>>,
-
-    /// Pending Android APK update selected by the most recent updater check.
-    #[cfg(target_os = "android")]
-    pub pending_mobile_update: Arc<Mutex<Option<commands::MobileAppUpdate>>>,
-
-    /// Application data directory (for persistence file paths).
-    pub app_data_dir: PathBuf,
-
-    /// Automatic file-update check scheduler shared with its service.
-    pub file_auto_check: Arc<file_auto_check::FileAutoCheckRuntime>,
-
-    /// Background service manager.  Wrapped in Arc+Mutex so it can be
-    /// activated on the async runtime and later shut down.
-    pub service_manager: Arc<tokio::sync::Mutex<Option<ServiceManager>>>,
-}
+mod upload_runtime;
+pub use upload_runtime::{ActiveUploadRegistry, UploadInterruption};
 
 #[cfg(target_os = "android")]
 pub struct AndroidApkInstaller<R: Runtime> {
@@ -312,52 +72,6 @@ pub struct AndroidGithubCredentialPlugin<R: Runtime> {
 }
 
 // ---------------------------------------------------------------------------
-// Local IP diagnostics
-// ---------------------------------------------------------------------------
-
-/// Best-effort detection of the local host addresses that would be used to
-/// reach an external peer (the "egress" addresses), for IPv4 and IPv6.
-///
-/// Uses the well-known UDP socket trick: binding a UDP socket to the
-/// unspecified address and "connecting" it to a public address makes the
-/// kernel pick a source address without sending any packet. This is
-/// dependency-free, works on every target platform (desktop and mobile), and
-/// performs no actual network I/O. Returns a de-duplicated list of local IPs.
-pub(crate) fn local_ip_addresses() -> Vec<std::net::IpAddr> {
-    // Probe addresses (Google DNS / Cloudflare DNS / 114 DNS). Only the
-    // routing decision matters; no packet is ever transmitted.
-    const PROBES: &[&str] = &[
-        "8.8.8.8:80",
-        "1.1.1.1:80",
-        "114.114.114.114:80",
-        "[2001:4860:4860::8888]:80",
-    ];
-
-    let mut seen = HashSet::new();
-    let mut addresses = Vec::new();
-    for probe in PROBES {
-        let bind_addr = if probe.starts_with('[') {
-            "[::]:0"
-        } else {
-            "0.0.0.0:0"
-        };
-        let Ok(socket) = std::net::UdpSocket::bind(bind_addr) else {
-            continue;
-        };
-        if socket.connect(probe).is_err() {
-            continue;
-        }
-        if let Ok(local) = socket.local_addr() {
-            let ip = local.ip();
-            if !ip.is_loopback() && seen.insert(ip) {
-                addresses.push(ip);
-            }
-        }
-    }
-    addresses
-}
-
-// ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
 
@@ -394,501 +108,9 @@ pub fn run() {
         .plugin(android_update_notification_plugin())
         .plugin(android_github_credential_plugin())
         .plugin(background_service_plugin())
-        .setup(|app| {
-            // The main WebView is deliberately configured with `create: false`.
-            // A scheduled reset must run before WebView2 opens (and locks) its
-            // data directory, and before the database or file logger is opened.
-            // Recovery mode deliberately avoids the persistent services too.
-            let reset_marker_path = local_data_reset::marker_path(app.handle())
-                .map_err(|e| Box::new(std::io::Error::other(e)))?;
-            let reset_status =
-                local_data_reset::complete_pending_reset(app.handle(), &reset_marker_path);
-            let reset_recovery_mode = reset_status.pending;
-            app.manage(local_data_reset::LocalDataResetRuntime::new(
-                reset_marker_path,
-                reset_status,
-            ));
-            let github_credentials = github_credentials::GithubCredentialState::new(app.handle());
-            if reset_recovery_mode {
-                github_credentials.begin_reset();
-            }
-            app.manage(github_credentials);
-            app.manage(preference_keys::PreferenceKeys::default());
-            app.manage(irc::IrcState::default());
-
-            let mut log_targets = Vec::new();
-            if cfg!(debug_assertions) {
-                log_targets.push(Target::new(TargetKind::Stdout));
-                log_targets.push(Target::new(TargetKind::Webview));
-            }
-            if !reset_recovery_mode {
-                log_targets.push(Target::new(TargetKind::LogDir { file_name: None }));
-            }
-            if log_targets.is_empty() {
-                log_targets.push(Target::new(TargetKind::Stdout));
-            }
-            let log_level = if cfg!(debug_assertions) {
-                LevelFilter::Debug
-            } else {
-                LevelFilter::Info
-            };
-            app.handle().plugin(
-                tauri_plugin_log::Builder::new()
-                    .level(log_level)
-                    .targets(log_targets)
-                    .build(),
-            )?;
-
-            // --- Determine application data directory ---
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| Box::new(std::io::Error::other(e.to_string())))?;
-            std::fs::create_dir_all(&app_data_dir)?;
-
-            let db_path = app_data_dir.join("cfms_client.db");
-            tracing::debug!("Opening application database");
-
-            // --- Open persistent database (user_settings only) ---
-            let db = if reset_recovery_mode {
-                cfms_service::db::open_in_memory()
-            } else {
-                cfms_service::db::open(&db_path)
-            }
-            .map_err(|e| Box::new(std::io::Error::other(format!("Database error: {e}"))))?;
-
-            let state = AppState::new();
-            let settings = SettingsStore::new(db);
-            let extensions =
-                ExtensionStore::new(settings.clone(), &app_data_dir, env!("CARGO_PKG_VERSION"));
-            let initial_locale = settings
-                .get("language")
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "zh_CN".to_string());
-            let localizer = Arc::new(LocalizationManager::new(initial_locale));
-            let tasks = QueueState::new();
-            let upload_tasks = UploadQueueState::new();
-            let active_downloads = ActiveRegistry::new();
-            let active_uploads = ActiveUploadRegistry::new();
-            let pending_update = Arc::new(Mutex::new(None));
-            #[cfg(target_os = "android")]
-            let pending_mobile_update = Arc::new(Mutex::new(None));
-
-            // --- Register background services (no Tokio context needed) ---
-            // Services are activated later inside a Tauri async runtime block.
-
-            let mut service_manager = ServiceManager::new();
-
-            if !reset_recovery_mode {
-                let s1 = Arc::clone(&state);
-                service_manager.register("token_refresh", move |rx| {
-                    let s = Arc::clone(&s1);
-                    async move {
-                        cfms_service::services::token_refresh::run(s, rx).await;
-                    }
-                });
-
-                let s2 = Arc::clone(&state);
-                let prefs_app_data_dir = app_data_dir.clone();
-                service_manager.register("favorites_validation", move |rx| {
-                    let s = Arc::clone(&s2);
-                    let app_data_dir = prefs_app_data_dir.clone();
-                    async move {
-                        cfms_service::services::favorites::run(s, app_data_dir, rx).await;
-                    }
-                });
-
-                let s3 = Arc::clone(&state);
-                service_manager.register("server_push", move |rx| {
-                    let s = Arc::clone(&s3);
-                    async move {
-                        cfms_service::services::server_push::run(s, rx).await;
-                    }
-                });
-
-                let s_reconnect = Arc::clone(&state);
-                service_manager.register("connection_reconnect", move |rx| {
-                    let s = Arc::clone(&s_reconnect);
-                    async move {
-                        cfms_service::services::connection::run(s, rx).await;
-                    }
-                });
-
-                let s4 = Arc::clone(&state);
-                let t4 = tasks.clone();
-                let a4 = active_downloads.clone();
-                service_manager.register("download_queue", move |rx| {
-                    let s = Arc::clone(&s4);
-                    let t = t4.clone();
-                    let a = a4.clone();
-                    async move {
-                        cfms_service::services::download_queue::run(s, t, a, rx).await;
-                    }
-                });
-
-                // Automatic file-update checks. Owned here (rather than by the
-                // Webview) so the interval keeps running while the app is
-                // backgrounded on mobile; see `file_auto_check`.
-                let check_app = app.handle().clone();
-                service_manager.register("file_auto_check", move |rx| async move {
-                    crate::file_auto_check::run(check_app, rx).await;
-                });
-            }
-
-            // --- Wrap service manager in Arc<Mutex<Option<...>>> ---
-            // This lets us activate it from the async runtime while also
-            // storing it in Tauri managed state for later shutdown.
-            let sm: Arc<tokio::sync::Mutex<Option<ServiceManager>>> =
-                Arc::new(tokio::sync::Mutex::new(Some(service_manager)));
-
-            // Activate on the Tauri async runtime.
-            if !reset_recovery_mode {
-                let sm = Arc::clone(&sm);
-                let rt_handle = tauri::async_runtime::handle();
-                rt_handle.spawn(async move {
-                    if let Some(ref mut mgr) = *sm.lock().await {
-                        mgr.activate();
-                    }
-                });
-            }
-
-            // --- Forward ServiceEvents to Tauri frontend ---
-            let handle = app.handle().clone();
-            let mut event_rx = state.event_tx.subscribe();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    match event_rx.recv().await {
-                        Ok(event) => {
-                            let _ = handle.emit("cfms:event", &event);
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!("Event broadcast lagged by {n} messages");
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            break;
-                        }
-                    }
-                }
-            });
-
-            // --- Register managed state ---
-            app.manage(AppHandleState {
-                public_keys: Arc::new(public_key_auth::PublicKeyState::default()),
-                inner: state,
-                tasks,
-                upload_tasks,
-                settings,
-                extensions,
-                active_downloads,
-                active_uploads,
-                connect_attempts: ConnectAttemptRegistry::default(),
-                localizer,
-                pending_update,
-                #[cfg(target_os = "android")]
-                pending_mobile_update,
-                app_data_dir: app_data_dir.clone(),
-                file_auto_check: Arc::new(file_auto_check::FileAutoCheckRuntime::new()),
-                service_manager: sm,
-            });
-
-            let mut main_window_config = app
-                .config()
-                .app
-                .windows
-                .iter()
-                .find(|config| config.label == "main")
-                .cloned()
-                .ok_or_else(|| std::io::Error::other("Main window configuration is missing"))?;
-            // Dev builds: make the window obviously non-production by suffixing
-            // the title with "-dev".
-            #[cfg(debug_assertions)]
-            {
-                main_window_config.title.push_str("-dev");
-            }
-
-            let main_window =
-                tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?;
-            #[cfg(target_os = "windows")]
-            let main_window = main_window.transparent(true);
-            main_window.build()?;
-
-            // Desktop shell: keep the app reachable from the tray. Labels are
-            // replaced by the Webview's localized strings once it boots.
-            #[cfg(desktop)]
-            if let Err(error) = desktop_shell::init_tray(
-                app.handle(),
-                desktop_shell::TrayLabels::default(),
-            ) {
-                tracing::warn!("Unable to create the system tray icon: {error}");
-            }
-
-            // Dev mode: auto-open the vulnerability testing tool in a separate window.
-            #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
-            {
-                let _ = tauri::WebviewWindowBuilder::new(
-                    app.handle(),
-                    "dev-tools",
-                    tauri::WebviewUrl::App("/dev/server-vuln-test".into()),
-                )
-                .title("CFMS 漏洞测试工具")
-                .inner_size(960.0, 720.0)
-                .min_inner_size(640.0, 480.0)
-                .resizable(true)
-                .center()
-                .build();
-            }
-
-            tracing::info!("CFMS Client initialized successfully");
-
-            // Diagnostic: log the local host IP addresses once at startup.
-            let local_ips = local_ip_addresses();
-            if local_ips.is_empty() {
-                tracing::warn!("Unable to determine local IP address(es)");
-            } else {
-                let joined = local_ips
-                    .iter()
-                    .map(std::net::IpAddr::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                tracing::info!("Local IP address(es): {joined}");
-            }
-
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            window_backdrop::set_window_backdrop,
-            commands::get_close_behavior,
-            commands::set_close_behavior,
-            commands::resolve_close_request,
-            commands::sync_desktop_shell_labels,
-            commands::greet,
-            commands::ping,
-            commands::protocol_version,
-            commands::crypto_info,
-            commands::local_ip_addresses,
-            commands::get_service_status,
-            commands::validate_file_shortcuts,
-            commands::android_passkey_availability,
-            commands::android_create_passkey,
-            commands::android_get_passkey,
-            commands::move_app_to_background,
-            commands::exit_app_after_launcher_transition,
-            commands::set_android_content_protected,
-            commands::show_android_update_notification,
-            commands::cancel_android_update_notification,
-            commands::get_github_auth_status,
-            commands::save_github_token,
-            commands::delete_github_token,
-            commands::check_app_update,
-            commands::install_app_update,
-            commands::add_download,
-            commands::get_download_tasks,
-            commands::pause_download,
-            commands::resume_download,
-            commands::retry_download,
-            commands::cancel_download,
-            commands::clear_completed_tasks,
-            commands::clear_failed_tasks,
-            commands::remove_download_records,
-            commands::delete_downloaded_files,
-            commands::enqueue_upload,
-            commands::get_upload_tasks,
-            commands::retry_upload,
-            commands::remove_upload_records,
-            commands::remove_transfer_records,
-            commands::control_transfer_tasks,
-            commands::scan_directory,
-            commands::list_directory,
-            commands::list_directory_page,
-            commands::resolve_node_path,
-            commands::get_document,
-            commands::check_downloads_exist,
-            commands::compute_local_sha256,
-            commands::delete_download_file,
-            commands::delete_download_directory_if_empty,
-            commands::move_download_file,
-            commands::create_download_placeholder,
-            commands::list_download_files,
-            commands::ensure_download_subdirectory,
-            commands::download_git_present,
-            commands::download_git_init,
-            commands::download_git_commit,
-            commands::get_setting,
-            commands::set_setting,
-            commands::get_file_auto_check_state,
-            commands::rebase_file_auto_check_schedule,
-            commands::get_extension_overview,
-            commands::import_extension_package,
-            commands::refresh_extension_catalog,
-            commands::install_extension_from_catalog,
-            commands::rollback_extension,
-            commands::uninstall_extension,
-            commands::set_extension_enabled,
-            commands::read_extension_page,
-            commands::read_extension_workflow,
-            commands::execute_extension_host_call,
-            commands::send_developer_request,
-            commands::get_locale,
-            commands::set_locale,
-            commands::translate_backend,
-            commands::get_connection_settings,
-            commands::set_connection_settings,
-            commands::get_protocol_version_settings,
-            commands::set_protocol_version_override,
-            commands::get_ca_certificate_status,
-            commands::update_ca_certificates,
-            commands::login,
-            commands::complete_login_mfa,
-            commands::get_user_authentication,
-            commands::request_escalation,
-            commands::drop_escalation,
-            commands::set_user_auth_policies,
-            commands::register_user_auth_public_key,
-            commands::pick_auth_private_key,
-            commands::release_auth_private_key,
-            commands::login_with_public_key,
-            commands::respond_public_key_interaction,
-            commands::cancel_public_key_authentication,
-            commands::prepare_preference_unlock,
-            commands::unlock_preference_dek,
-            commands::discard_locked_preference_data,
-            commands::update_user_auth_public_key,
-            commands::delete_user_auth_public_key,
-            commands::change_password,
-            commands::recover_preference_dek,
-            commands::logout,
-            commands::clear_auth_session,
-            commands::quit_application,
-            commands::connect,
-            commands::cancel_connect,
-            commands::disconnect,
-            commands::get_auth_status,
-            commands::get_server_state,
-            commands::get_2fa_status,
-            commands::setup_2fa,
-            commands::validate_2fa,
-            commands::cancel_2fa_setup,
-            commands::disable_2fa,
-            commands::get_managed_2fa_status,
-            commands::disable_managed_2fa,
-            commands::list_banned_subnets,
-            commands::create_banned_subnet,
-            commands::update_banned_subnet,
-            commands::delete_banned_subnet,
-            commands::list_auth_lockouts,
-            commands::unlock_auth_lockouts,
-            commands::delete_download,
-            commands::open_downloaded_file,
-            commands::read_server_document,
-            commands::scan_local_chatbox,
-            commands::open_local_path,
-            commands::open_downloaded_document,
-            commands::create_directory,
-            commands::delete_directory,
-            commands::delete_document,
-            commands::rename_directory,
-            commands::rename_document,
-            commands::move_directory,
-            commands::move_document,
-            commands::get_directory_info,
-            commands::get_document_info,
-            commands::set_document_tags,
-            commands::view_access_entries,
-            commands::revoke_access,
-            commands::grant_access,
-            commands::get_access_rules,
-            commands::set_access_rules,
-            commands::list_revisions,
-            commands::get_revision,
-            commands::set_current_revision,
-            commands::delete_revision,
-            commands::upload_new_revision,
-            commands::upload_document_file,
-            commands::upload_chat_record,
-            commands::inspect_upload_directory_conflicts,
-            commands::upload_directory,
-            commands::select_upload_directory,
-            commands::classify_upload_path,
-            commands::pause_upload,
-            commands::resume_upload,
-            commands::cancel_upload,
-            commands::search_files,
-            commands::list_deleted_items,
-            commands::restore_document,
-            commands::restore_directory,
-            commands::purge_document,
-            commands::purge_directory,
-            commands::list_users,
-            commands::create_user,
-            commands::rename_user,
-            commands::delete_user,
-            commands::get_user_info,
-            commands::change_user_groups,
-            commands::change_user_permissions,
-            commands::reset_user_password,
-            commands::manage_user_status,
-            commands::set_lockdown,
-            commands::block_user,
-            commands::list_user_blocks,
-            commands::unblock_user,
-            commands::update_user_block,
-            commands::list_groups,
-            commands::create_group,
-            commands::rename_group,
-            commands::delete_group,
-            commands::get_group_info,
-            commands::change_group_permissions,
-            commands::view_audit_logs,
-            commands::server_diagnostics,
-            commands::list_scheduled_task_types,
-            commands::list_schedules,
-            commands::get_schedule,
-            commands::create_schedule,
-            commands::update_schedule,
-            commands::delete_schedule,
-            commands::list_user_keys,
-            commands::get_user_key,
-            commands::delete_user_key,
-            commands::get_user_avatar,
-            commands::download_avatar,
-            commands::check_cached_avatar,
-            commands::set_user_avatar,
-            commands::load_user_preference,
-            commands::save_user_preference,
-            commands::load_appearance_preference,
-            commands::save_appearance_preference,
-            commands::setup_preference_dek,
-            commands::discard_user_preference,
-            commands::reset_preference_dek,
-            commands::reload_tasks_for_user,
-            commands::get_local_data_reset_status,
-            commands::reset_local_data,
-            commands::retry_local_data_reset,
-            commands::scan_migration_source,
-            commands::import_migration,
-            commands::save_credentials,
-            commands::load_credentials,
-            commands::list_credentials,
-            commands::delete_credential,
-            commands::clear_credentials,
-            commands::has_saved_credentials,
-            commands::send_raw_request,
-            commands::fetch_server_page,
-            commands::open_dev_tools_window,
-            irc::irc_connect,
-            irc::irc_disconnect,
-            irc::irc_send_message,
-            irc::irc_raw,
-            irc::irc_status,
-        ])
-        .on_window_event(|window, event| {
-            // Close-button policy: quit, hide to the tray, or ask the Webview.
-            #[cfg(desktop)]
-            desktop_shell::handle_window_event(window, event);
-            #[cfg(not(desktop))]
-            let _ = (window, event);
-        })
+        .setup(bootstrap::setup)
+        .invoke_handler(commands::registry::handler())
+        .on_window_event(custom::on_window_event)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -935,7 +157,7 @@ fn biometric_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "android")]
 fn apk_installer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("apk-installer")
         .setup(|app, api| {
@@ -953,7 +175,7 @@ fn apk_installer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "android")]
 fn file_opener_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("file-opener")
         .setup(|app, api| {
@@ -971,7 +193,7 @@ fn file_opener_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "android")]
 fn upload_file_importer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("upload-file-importer")
         .setup(|app, api| {
@@ -990,7 +212,7 @@ fn upload_file_importer_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugi
 
 #[cfg(target_os = "android")]
 fn android_passkey_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("android-passkey")
         .setup(|app, api| {
@@ -1008,7 +230,7 @@ fn android_passkey_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> 
 
 #[cfg(target_os = "android")]
 fn android_app_lifecycle_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("android-app-lifecycle")
         .setup(|app, api| {
@@ -1027,7 +249,7 @@ fn android_app_lifecycle_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlug
 
 #[cfg(target_os = "android")]
 fn android_secure_screen_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("android-secure-screen")
         .setup(|app, api| {
@@ -1046,7 +268,7 @@ fn android_secure_screen_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlug
 
 #[cfg(target_os = "android")]
 fn android_update_notification_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("android-update-notification")
         .setup(|app, api| {
@@ -1065,7 +287,7 @@ fn android_update_notification_plugin<R: tauri::Runtime>() -> tauri::plugin::Tau
 
 #[cfg(target_os = "android")]
 fn android_github_credential_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    const PLUGIN_IDENTIFIER: &str = "com.rosmontis220.cfmsmodded";
+    const PLUGIN_IDENTIFIER: &str = "org.crpteam.cfms_client_tauri";
 
     tauri::plugin::Builder::new("android-github-credential")
         .setup(|app, api| {

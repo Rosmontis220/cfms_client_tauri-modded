@@ -39,7 +39,7 @@ Authorized files are decrypted locally. Users therefore work in trusted environm
 - A shared cross-platform interface for desktop and Android, with platform-specific interaction optimization where needed, including enlarged touch targets on touch devices. Platform support does not imply a different visual language for each operating system.
 - Sensitive networking and file operations cross the Tauri IPC boundary and are handled by the Rust service layer rather than directly by the frontend.
 - Server addresses, permissions, document scope, administrative capabilities, and lockdown state remain controlled by the connected CFMS server.
-- Installable signed extension packages are desktop-only at present; built-in optional modules may remain available on mobile.
+- Signed extension packages are in preview on Windows, Linux, and Android through the signed catalog; local package import remains desktop-only. Built-in optional modules remain available on mobile.
 
 ## Brand Commitments
 
@@ -52,8 +52,8 @@ Preserve the established English and Simplified Chinese terminology and the appl
 ## Evidence on Hand
 
 - `README.md` documents the product purpose, supported workflows, deployment assumptions, architecture, security model, and operational guidance.
-- `src/lib/i18n/messages/en.ts` and `src/lib/i18n/messages/zh-CN.ts` contain the real bilingual product copy and terminology.
-- `src/routes/` and `src/lib/components/` contain implemented connection, authentication, file-management, transfer, administration, privacy, settings, and recovery workflows.
+- `src/lib/shared/i18n/messages/en.ts` and `src/lib/shared/i18n/messages/zh-CN.ts` contain the real bilingual product copy and terminology.
+- `src/lib/app/`, `src/lib/features/`, and the thin `src/routes/` adapters contain implemented connection, authentication, file-management, transfer, administration, privacy, settings, and recovery workflows.
 - `src-tauri/` and `crates/` contain the implemented native shell, service, transport, transfer, and cryptographic boundaries.
 - `static/` and `src-tauri/icons/` contain the current application icons, fonts, and bundled visual assets.
 - No testimonials, customer logos, deployment counts, performance benchmarks, or other marketing proof are established in the repository; future work must not fabricate them.

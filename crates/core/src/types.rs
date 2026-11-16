@@ -283,6 +283,18 @@ pub struct UploadTaskDto {
     pub retry_count: u32,
     pub max_retries: u32,
     pub source_available: bool,
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub batch_name: Option<String>,
+    #[serde(default)]
+    pub batch_created_at: Option<i64>,
+    #[serde(default)]
+    pub batch_index: u32,
+    #[serde(default)]
+    pub queue_order: u64,
+    #[serde(default)]
+    pub revision: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +306,23 @@ pub struct UploadTaskDto {
 #[serde(tag = "event", content = "data")]
 #[allow(clippy::large_enum_variant)] // Event payloads cross the serialized service boundary as values.
 pub enum ServiceEvent {
+    DownloadBatchesChanged,
+    AccessBatchChanged {
+        id: String,
+    },
+    AppLockChanged,
+    AppLockAttemptsExceeded,
+    UserPreferencesChanged,
+    DownloadBatchFinished {
+        queued: u32,
+        failed: u32,
+        rate_limited: u32,
+        stopped: bool,
+    },
+    ConnectionSecurityChanged {
+        connection_id: u64,
+        status: crate::RevocationStatus,
+    },
     /// A download's progress has changed.
     DownloadProgress {
         task_id: String,
@@ -308,29 +337,46 @@ pub enum ServiceEvent {
         total_bytes: u64,
     },
     /// A download task snapshot has changed.
-    DownloadTaskUpdated { task: DownloadTaskDto },
+    DownloadTaskUpdated {
+        task: DownloadTaskDto,
+    },
     /// A stale server-side task was replaced while preserving the logical download.
     DownloadTaskReplaced {
         old_task_id: String,
         task: DownloadTaskDto,
     },
     /// A download has completed successfully.
-    DownloadCompleted { task_id: String, file_path: String },
+    DownloadCompleted {
+        task_id: String,
+        file_path: String,
+    },
     /// A download has failed.
-    DownloadFailed { task_id: String, error: String },
+    DownloadFailed {
+        task_id: String,
+        error: String,
+    },
     /// A download was paused by the user.
-    DownloadPaused { task_id: String },
+    DownloadPaused {
+        task_id: String,
+    },
     /// A download was cancelled.
-    DownloadCancelled { task_id: String },
+    DownloadCancelled {
+        task_id: String,
+    },
     /// Server lockdown status changed.
     Lockdown {
         status: bool,
         reason: Option<String>,
     },
     /// The primary connection was restored after an unexpected disconnect.
-    ConnectionRestored,
+    ConnectionRestored {
+        connection_id: u64,
+        status: crate::RevocationStatus,
+    },
     /// The primary connection could not be restored automatically.
-    ConnectionLost { error: String },
+    ConnectionLost {
+        error: String,
+    },
     /// The authentication token has expired.
     TokenExpired,
     /// A favorites/recent validation cycle completed.
@@ -342,7 +388,9 @@ pub enum ServiceEvent {
         access_denied_directories: Vec<String>,
     },
     /// The number of active (non-terminal, badge-eligible) download tasks changed.
-    ActiveCountChanged { count: u32 },
+    ActiveCountChanged {
+        count: u32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -681,7 +729,7 @@ pub struct UserPreference {
 
     /// Per-account activation, grants, and private settings for installed extensions.
     #[serde(default)]
-    pub extensions: std::collections::BTreeMap<String, ExtensionPreference>,
+    pub extensions: std::collections::BTreeMap<String, crate::extension_types::ExtensionPreference>,
 }
 
 impl Default for UserPreference {
@@ -707,19 +755,6 @@ impl Default for UserPreference {
             extensions: std::collections::BTreeMap::new(),
         }
     }
-}
-
-/// Account-scoped state for one device-global extension installation.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct ExtensionPreference {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub install_epoch: String,
-    #[serde(default)]
-    pub granted_capabilities: Vec<String>,
-    #[serde(default)]
-    pub settings: serde_json::Value,
 }
 
 fn default_record_recent_visits() -> bool {

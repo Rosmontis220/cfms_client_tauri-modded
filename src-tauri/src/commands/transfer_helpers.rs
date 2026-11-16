@@ -1,33 +1,26 @@
-/// Convenience helper: extract (connection, username, token) from app state.
-async fn get_connection_auth(
-    state: &AppHandleState,
-) -> Result<
-    (
-        cfms_transport::Connection,
-        String,
-        cfms_service::sensitive::SecretString,
-    ),
-    String,
-> {
-    let conn = cfms_service::services::connection::ensure_connected(
-        &state.inner,
-        cfms_service::services::connection::DEFAULT_RECONNECT_ATTEMPTS,
-        false,
-    )
-    .await
-    .map_err(|e| format!("Not connected to a server: {e}"))?;
-    let username = state
-        .inner
-        .username
-        .read()
-        .await
-        .clone()
-        .ok_or_else(|| "Not logged in".to_string())?;
-    let token = state.inner.request_token().await.ok_or("Not logged in")?;
-    Ok((conn, username, token))
-}
+use super::session::get_connection_auth;
+use super::shared_helpers::format_server_response_error;
+use super::shared_helpers::format_transport_error;
+use super::shared_helpers::send_action_request;
+#[cfg(target_os = "android")]
+use super::transfer_types::AndroidImportedUploadPath;
+use super::transfer_types::PreparedUploadSource;
+use super::transfer_types::UploadConflictStrategy;
+use super::transfer_types::UploadFileResult;
+use super::transfer_types::UploadProgressEvent;
+use super::upload_tasks::emit_upload_snapshot;
+#[cfg(target_os = "android")]
+use crate::AndroidUploadFileImporter;
+use crate::AppHandleState;
+use crate::UploadInterruption;
+use cfms_service::transfers::MAX_UPLOAD_RETRIES;
+use cfms_service::transfers::suffixed_upload_name;
+use cfms_service::transfers::upload_retry_delay;
+use tauri::Emitter;
+use tauri::Manager;
+use tauri::Runtime;
 
-fn default_download_root(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+pub(super) fn download_root(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(app_handle
         .path()
         .resolve("downloads", tauri::path::BaseDirectory::Download)
@@ -39,72 +32,9 @@ fn default_download_root(app_handle: &tauri::AppHandle) -> Result<std::path::Pat
         }))
 }
 
-/// Resolve the download root directory, respecting the user's external storage
-/// preference when configured.
-pub(crate) async fn resolve_download_root(
-    app_handle: &tauri::AppHandle,
-    state: &AppHandleState,
-) -> Result<std::path::PathBuf, String> {
-    // Try to load user preferences to check for external storage setting.
-    if let (Some(server_addr), Some(username), Some(dek)) = (
-        state.inner.server_address.read().await.clone(),
-        state.inner.username.read().await.clone(),
-        state.inner.dek.read().await.clone(),
-    ) {
-        let server_hash = cfms_core::get_server_hash(&server_addr);
-        let app_data = state.app_data_dir.clone();
-        let load_task = tokio::task::spawn_blocking(move || {
-            cfms_service::user_preferences::load(&app_data, &server_hash, &username, Some(&*dek))
-        });
-        let prefs = match load_task.await {
-            Ok(Ok(p)) => p,
-            _ => return default_download_root(app_handle),
-        };
-        if prefs.use_external_storage && !prefs.external_storage_path.trim().is_empty() {
-            let path = std::path::PathBuf::from(&prefs.external_storage_path);
-            if path.is_absolute() {
-                let root = path.join("downloads");
-                // Persist the resolved path as an unencrypted hint so that
-                // the local-data-reset codepath (which runs before the DEK is
-                // available) can locate and clean the download directory.
-                let _ = write_download_root_hint(&state.app_data_dir, &root);
-                return Ok(root);
-            }
-        }
-    }
-
-    // Clear any stale external-storage hint when falling back to the default.
-    let _ = clear_download_root_hint(&state.app_data_dir);
-    default_download_root(app_handle)
-}
-
-const DOWNLOAD_ROOT_HINT_NAME: &str = ".cfms-download-root";
-
-fn download_root_hint_path(app_data: &std::path::Path) -> std::path::PathBuf {
-    app_data.join(DOWNLOAD_ROOT_HINT_NAME)
-}
-
-fn write_download_root_hint(app_data: &std::path::Path, root: &std::path::Path) -> Result<(), String> {
-    let path = download_root_hint_path(app_data);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    std::fs::write(&path, root.to_string_lossy().as_bytes())
-        .map_err(|e| format!("Failed to write download-root hint: {e}"))
-}
-
-fn clear_download_root_hint(app_data: &std::path::Path) -> Result<(), String> {
-    let path = download_root_hint_path(app_data);
-    if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to remove download-root hint: {e}"))?;
-    }
-    Ok(())
-}
-
-async fn create_transfer_connection(
+pub(super) async fn create_transfer_connection(
     state: &cfms_service::state::AppState,
-) -> Result<cfms_transport::Connection, String> {
+) -> cfms_core::Result<cfms_transport::Connection> {
     let (url, ca_dir, disable_ssl, proxy_addr, force_ipv4, client_cert_path, client_key_path) = {
         let addr = state.server_address.read().await;
         let ca = state.ca_dir.read().await;
@@ -124,42 +54,45 @@ async fn create_transfer_connection(
         )
     };
 
-    let url = url.ok_or_else(|| "No server address configured".to_string())?;
-    let ca_dir = ca_dir.ok_or_else(|| "No CA directory configured".to_string())?;
+    let url = url.ok_or_else(|| cfms_core::Error::Other("No server address configured".into()))?;
+    let ca_dir =
+        ca_dir.ok_or_else(|| cfms_core::Error::Other("No CA directory configured".into()))?;
 
     let tls_config = cfms_transport::tls::build_config_with_identity(
         &ca_dir,
         disable_ssl,
         client_cert_path.as_deref(),
         client_key_path.as_deref(),
-    )
-    .map_err(|e| format!("TLS config error: {e}"))?;
+        std::sync::Arc::clone(&state.crl_service),
+    )?;
 
-    cfms_transport::Connection::connect(&url, tls_config, proxy_addr.as_deref(), force_ipv4)
-        .await
-        .map_err(|e| format!("Transfer connection failed: {e}"))
+    cfms_transport::Connection::connect(&url, tls_config, proxy_addr.as_deref(), force_ipv4).await
 }
 
-struct UploadTransferSession {
-    conn: Option<cfms_transport::Connection>,
+pub(super) struct UploadTransferSession {
+    pub(super) conn: Option<cfms_transport::Connection>,
+    pub(super) directory_progress: Option<(u64, u64)>,
 }
 
 impl UploadTransferSession {
-    fn new() -> Self {
-        Self { conn: None }
+    pub(super) fn new() -> Self {
+        Self {
+            conn: None,
+            directory_progress: None,
+        }
     }
 
     async fn get(
         &mut self,
         state: &cfms_service::state::AppState,
-    ) -> Result<cfms_transport::Connection, String> {
+    ) -> cfms_core::Result<cfms_transport::Connection> {
         if self
             .conn
             .as_ref()
             .is_some_and(cfms_transport::Connection::is_closed)
             && let Some(conn) = self.conn.take()
         {
-            conn.close().await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), conn.close()).await;
         }
 
         if self.conn.is_none() {
@@ -175,46 +108,41 @@ impl UploadTransferSession {
 
     async fn discard(&mut self) {
         if let Some(conn) = self.conn.take() {
-            conn.close().await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), conn.close()).await;
         }
     }
 
-    async fn close(&mut self) {
-        self.discard().await;
-    }
-}
-
-const MAX_UPLOAD_RETRIES: u32 = 3;
-
-fn upload_retry_delay(error: &cfms_core::Error, attempt: u32) -> Option<std::time::Duration> {
-    if attempt >= MAX_UPLOAD_RETRIES {
-        return None;
-    }
-
-    let fallback_seconds = 1u64 << attempt.min(3);
-    let seconds = match error {
-        cfms_core::Error::Connection(_) => fallback_seconds,
-        cfms_core::Error::Server {
-            code: 429,
-            retry_after_seconds,
-            ..
-        } => retry_after_seconds.unwrap_or(fallback_seconds),
-        cfms_core::Error::Server { code, .. } if matches!(*code, 500 | 502 | 503 | 504) => {
-            fallback_seconds
+    pub(super) async fn close(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            tauri::async_runtime::spawn(async move {
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), conn.close()).await;
+            });
         }
-        _ => return None,
-    };
-    Some(std::time::Duration::from_secs(seconds))
+    }
 }
 
-async fn wait_for_upload_resume(
+impl Drop for UploadTransferSession {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            tauri::async_runtime::spawn(async move {
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), conn.close()).await;
+            });
+        }
+    }
+}
+
+pub(super) async fn wait_for_upload_resume<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    id: &str,
     control: &mut tokio::sync::watch::Receiver<Option<UploadInterruption>>,
 ) -> Result<(), UploadInterruption> {
     loop {
         match *control.borrow() {
             None => return Ok(()),
             Some(UploadInterruption::Cancelled) => return Err(UploadInterruption::Cancelled),
-            Some(UploadInterruption::Paused) => {}
+            Some(UploadInterruption::Paused) => {
+                app.state::<AppHandleState>().active_uploads.park(id);
+            }
         }
         if control.changed().await.is_err() {
             return Err(UploadInterruption::Cancelled);
@@ -222,11 +150,11 @@ async fn wait_for_upload_resume(
     }
 }
 
-struct CreateServerDirectoryResult {
-    id: String,
+pub(super) struct CreateServerDirectoryResult {
+    pub(super) id: String,
 }
 
-async fn create_server_directory(
+pub(super) async fn create_server_directory(
     state: &AppHandleState,
     parent_id: Option<String>,
     name: String,
@@ -251,13 +179,11 @@ async fn create_server_directory(
         && resp.data.get("type").and_then(|v| v.as_str()) == Some("directory")
         && let Some(id) = resp.data.get("id").and_then(|v| v.as_str())
     {
-        return Ok(CreateServerDirectoryResult {
-            id: id.to_string(),
-        });
+        return Ok(CreateServerDirectoryResult { id: id.to_string() });
     }
 
     if resp.code != 200 {
-        return Err(format!("Server returned {}: {}", resp.code, resp.message));
+        return Err(format_server_response_error(&resp));
     }
 
     let id = resp
@@ -270,7 +196,7 @@ async fn create_server_directory(
     Ok(CreateServerDirectoryResult { id })
 }
 
-fn clean_optional_upload_name(name: Option<String>) -> Option<String> {
+pub(super) fn clean_optional_upload_name(name: Option<String>) -> Option<String> {
     name.and_then(|value| {
         let cleaned = value
             .chars()
@@ -291,7 +217,7 @@ fn clean_optional_upload_name(name: Option<String>) -> Option<String> {
 }
 
 #[cfg(target_os = "android")]
-fn prepare_upload_source<R: Runtime>(
+pub(super) fn prepare_upload_source<R: Runtime>(
     app_handle: &tauri::AppHandle<R>,
     file_path: String,
 ) -> Result<PreparedUploadSource, String> {
@@ -325,7 +251,7 @@ fn prepare_upload_source<R: Runtime>(
 }
 
 #[cfg(not(target_os = "android"))]
-fn prepare_upload_source<R: Runtime>(
+pub(super) fn prepare_upload_source<R: Runtime>(
     _app_handle: &tauri::AppHandle<R>,
     file_path: String,
 ) -> Result<PreparedUploadSource, String> {
@@ -342,7 +268,7 @@ fn prepare_upload_source<R: Runtime>(
 }
 
 #[cfg(target_os = "android")]
-fn prepare_upload_directory_source<R: Runtime>(
+pub(super) fn prepare_upload_directory_source<R: Runtime>(
     app_handle: &tauri::AppHandle<R>,
     directory_path: String,
 ) -> Result<PreparedUploadSource, String> {
@@ -376,7 +302,7 @@ fn prepare_upload_directory_source<R: Runtime>(
 }
 
 #[cfg(not(target_os = "android"))]
-fn prepare_upload_directory_source<R: Runtime>(
+pub(super) fn prepare_upload_directory_source<R: Runtime>(
     _app_handle: &tauri::AppHandle<R>,
     directory_path: String,
 ) -> Result<PreparedUploadSource, String> {
@@ -392,7 +318,7 @@ fn prepare_upload_directory_source<R: Runtime>(
     })
 }
 
-async fn upload_local_file<R: Runtime>(
+pub(super) async fn upload_local_file<R: Runtime>(
     app_handle: &tauri::AppHandle<R>,
     state: &AppHandleState,
     parent_id: Option<String>,
@@ -414,9 +340,39 @@ async fn upload_local_file<R: Runtime>(
                 .map(ToOwned::to_owned)
         })
         .ok_or_else(|| "Selected file has no valid name".to_string())?;
-    let mut upload_control = state.active_uploads.register(&upload_id);
+    let source_size = std::fs::metadata(&source).map(|m| m.len()).unwrap_or(0);
+    let directory_progress = transfer_session.directory_progress;
+    let emit_file_progress = move |app: &tauri::AppHandle<R>,
+                                   id: &str,
+                                   task_id: Option<&str>,
+                                   name: &str,
+                                   current: u64,
+                                   total: u64,
+                                   status: &str,
+                                   message: Option<String>| {
+        let (current, total) = if let Some((offset, all)) = directory_progress {
+            (
+                offset.saturating_add(if matches!(status, "completed" | "skipped") {
+                    source_size
+                } else {
+                    current
+                }),
+                all,
+            )
+        } else {
+            (current, total)
+        };
+        emit_upload_progress(app, id, task_id, name, current, total, status, message);
+    };
+    let mut upload_control = state
+        .active_uploads
+        .subscribe(&upload_id)
+        .ok_or_else(|| "Upload must be submitted through the queue".to_string())?;
+    wait_for_upload_resume(app_handle, &upload_id, &mut upload_control)
+        .await
+        .map_err(|reason| upload_interruption_message(reason).to_string())?;
 
-    emit_upload_progress(
+    emit_file_progress(
         app_handle,
         &upload_id,
         None,
@@ -430,7 +386,6 @@ async fn upload_local_file<R: Runtime>(
     let (conn, username, token) = match get_connection_auth(state).await {
         Ok(auth) => auth,
         Err(err) => {
-            state.active_uploads.unregister(&upload_id);
             return Err(err);
         }
     };
@@ -449,7 +404,6 @@ async fn upload_local_file<R: Runtime>(
     {
         Ok(response) => response,
         Err(err) => {
-            state.active_uploads.unregister(&upload_id);
             return Err(err);
         }
     };
@@ -472,7 +426,6 @@ async fn upload_local_file<R: Runtime>(
             {
                 Ok(response) => response,
                 Err(err) => {
-                    state.active_uploads.unregister(&upload_id);
                     return Err(err);
                 }
             };
@@ -497,7 +450,7 @@ async fn upload_local_file<R: Runtime>(
 
         match (conflict_strategy, conflict_type, conflict_id) {
             (UploadConflictStrategy::Skip, _, _) => {
-                emit_upload_progress(
+                emit_file_progress(
                     app_handle,
                     &upload_id,
                     None,
@@ -507,7 +460,6 @@ async fn upload_local_file<R: Runtime>(
                     "skipped",
                     Some("Skipped existing document".to_string()),
                 );
-                state.active_uploads.unregister(&upload_id);
                 return Ok(UploadFileResult {
                     upload_id,
                     task_id: None,
@@ -529,48 +481,33 @@ async fn upload_local_file<R: Runtime>(
                 {
                     Ok(response) => response,
                     Err(err) => {
-                        state.active_uploads.unregister(&upload_id);
                         return Err(err);
                     }
                 };
 
                 if upload_resp.code != 200 {
-                    state.active_uploads.unregister(&upload_id);
-                    return Err(format!(
-                        "Server returned {}: {}",
-                        upload_resp.code, upload_resp.message
-                    ));
+                    return Err(format_server_response_error(&upload_resp));
                 }
 
                 overwritten = true;
                 let task_id = match extract_task_id(&upload_resp.data) {
                     Ok(id) => id,
                     Err(err) => {
-                        state.active_uploads.unregister(&upload_id);
                         return Err(err);
                     }
                 };
                 (task_id, Some(document_id), false)
             }
             _ => {
-                state.active_uploads.unregister(&upload_id);
-                return Err(format!(
-                    "Server returned {}: {}",
-                    create_resp.code, create_resp.message
-                ));
+                return Err(format_server_response_error(&create_resp));
             }
         }
     } else if create_resp.code != 200 {
-        state.active_uploads.unregister(&upload_id);
-        return Err(format!(
-            "Server returned {}: {}",
-            create_resp.code, create_resp.message
-        ));
+        return Err(format_server_response_error(&create_resp));
     } else {
         let task_id = match extract_task_id(&create_resp.data) {
             Ok(id) => id,
             Err(err) => {
-                state.active_uploads.unregister(&upload_id);
                 return Err(err);
             }
         };
@@ -587,8 +524,17 @@ async fn upload_local_file<R: Runtime>(
     let progress_upload_id = upload_id.clone();
     let progress_task_id = task_id.clone();
     let progress_file_name = file_name.clone();
+    let progress_run = state.active_uploads.run_id(&upload_id);
     let progress = move |current: u64, total: u64| {
-        emit_upload_progress(
+        if emit_handle
+            .state::<AppHandleState>()
+            .active_uploads
+            .run_id(&progress_upload_id)
+            != progress_run
+        {
+            return;
+        }
+        emit_file_progress(
             &emit_handle,
             &progress_upload_id,
             Some(&progress_task_id),
@@ -607,10 +553,11 @@ async fn upload_local_file<R: Runtime>(
             transfer_session.discard().await;
             emit_interrupted_upload(app_handle, &upload_id, Some(&task_id), &file_name, reason);
             if reason == UploadInterruption::Cancelled {
-                state.active_uploads.unregister(&upload_id);
                 return Err(upload_interruption_message(reason).to_string());
             }
-            if let Err(cancelled) = wait_for_upload_resume(&mut upload_control).await {
+            if let Err(cancelled) =
+                wait_for_upload_resume(app_handle, &upload_id, &mut upload_control).await
+            {
                 emit_interrupted_upload(
                     app_handle,
                     &upload_id,
@@ -618,11 +565,10 @@ async fn upload_local_file<R: Runtime>(
                     &file_name,
                     cancelled,
                 );
-                state.active_uploads.unregister(&upload_id);
                 return Err(upload_interruption_message(cancelled).to_string());
             }
             retry_attempt = 0;
-            emit_upload_progress(
+            emit_file_progress(
                 app_handle,
                 &upload_id,
                 Some(&task_id),
@@ -636,9 +582,41 @@ async fn upload_local_file<R: Runtime>(
 
         let transfer_conn = match transfer_session.get(&state.inner).await {
             Ok(conn) => conn,
-            Err(err) => {
-                state.active_uploads.unregister(&upload_id);
-                return Err(err);
+            Err(error) => {
+                let Some(delay) = upload_retry_delay(&error, retry_attempt) else {
+                    let message = format_transport_error(&error);
+                    emit_file_progress(
+                        app_handle,
+                        &upload_id,
+                        Some(&task_id),
+                        &file_name,
+                        0,
+                        0,
+                        "failed",
+                        Some(message.clone()),
+                    );
+                    return Err(message);
+                };
+
+                retry_attempt += 1;
+                state.upload_tasks.note_retry(&upload_id, retry_attempt);
+                emit_file_progress(
+                    app_handle,
+                    &upload_id,
+                    Some(&task_id),
+                    &file_name,
+                    0,
+                    0,
+                    "uploading",
+                    Some(format!(
+                        "Server temporarily unavailable; retrying upload (attempt {retry_attempt}/{MAX_UPLOAD_RETRIES})"
+                    )),
+                );
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    _ = upload_control.changed() => {}
+                }
+                continue;
             }
         };
         state
@@ -670,8 +648,8 @@ async fn upload_local_file<R: Runtime>(
                     continue;
                 }
                 let Some(delay) = upload_retry_delay(&error, retry_attempt) else {
-                    let message = format!("Upload failed: {error}");
-                    emit_upload_progress(
+                    let message = format_transport_error(&error);
+                    emit_file_progress(
                         app_handle,
                         &upload_id,
                         Some(&task_id),
@@ -681,12 +659,12 @@ async fn upload_local_file<R: Runtime>(
                         "failed",
                         Some(message.clone()),
                     );
-                    state.active_uploads.unregister(&upload_id);
                     return Err(message);
                 };
 
                 retry_attempt += 1;
-                emit_upload_progress(
+                state.upload_tasks.note_retry(&upload_id, retry_attempt);
+                emit_file_progress(
                     app_handle,
                     &upload_id,
                     Some(&task_id),
@@ -706,17 +684,16 @@ async fn upload_local_file<R: Runtime>(
         }
     }
 
-    emit_upload_progress(
+    emit_file_progress(
         app_handle,
         &upload_id,
         Some(&task_id),
         &file_name,
-        1,
-        1,
+        std::fs::metadata(&source).map(|m| m.len()).unwrap_or(0),
+        std::fs::metadata(&source).map(|m| m.len()).unwrap_or(0),
         "completed",
         Some("Upload completed".to_string()),
     );
-    state.active_uploads.unregister(&upload_id);
 
     Ok(UploadFileResult {
         upload_id,
@@ -728,7 +705,7 @@ async fn upload_local_file<R: Runtime>(
     })
 }
 
-fn upload_interruption_message(reason: UploadInterruption) -> &'static str {
+pub(super) fn upload_interruption_message(reason: UploadInterruption) -> &'static str {
     match reason {
         UploadInterruption::Paused => "Upload paused",
         UploadInterruption::Cancelled => "Upload cancelled",
@@ -768,14 +745,10 @@ fn emit_upload_progress<R: Runtime>(
     status: &str,
     message: Option<String>,
 ) {
-    let progress = if total_bytes > 0 {
-        current_bytes as f64 / total_bytes as f64
-    } else if status == "completed" {
-        1.0
-    } else {
-        0.0
-    };
-
+    let state = app_handle.state::<AppHandleState>();
+    if state.active_uploads.generation(upload_id) != Some(state.upload_tasks.generation()) {
+        return;
+    }
     let persistent_status = match status {
         "pending" => cfms_core::UploadTaskStatus::Pending,
         "paused" => cfms_core::UploadTaskStatus::Paused,
@@ -786,29 +759,39 @@ fn emit_upload_progress<R: Runtime>(
         "skipped" => cfms_core::UploadTaskStatus::Skipped,
         _ => cfms_core::UploadTaskStatus::Uploading,
     };
-    app_handle.state::<AppHandleState>().upload_tasks.update_progress(
-        upload_id,
-        task_id,
-        file_name,
-        current_bytes,
-        total_bytes,
-        persistent_status,
-        message.clone(),
-    );
-
-    let _ = app_handle.emit(
-        "cfms:upload-progress",
-        UploadProgressEvent {
-            upload_id: upload_id.to_string(),
-            task_id: task_id.map(ToOwned::to_owned),
-            file_name: file_name.to_string(),
+    app_handle
+        .state::<AppHandleState>()
+        .upload_tasks
+        .update_progress(
+            upload_id,
+            task_id,
+            file_name,
             current_bytes,
             total_bytes,
-            progress,
-            status: status.to_string(),
-            message,
-        },
-    );
+            persistent_status,
+            message.clone(),
+        );
+
+    emit_upload_snapshot(app_handle, upload_id);
+    // This event is a notification for mounted file views, not a scheduler callback.
+    if let Some(task) = state.upload_tasks.get(upload_id) {
+        let _ = app_handle.emit(
+            "cfms:upload-progress",
+            UploadProgressEvent {
+                upload_id: task.upload_id,
+                task_id: task.task_id,
+                file_name: task.file_name,
+                current_bytes: task.current_bytes,
+                total_bytes: task.total_bytes,
+                progress: task.progress,
+                status: serde_json::to_value(task.status)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_default(),
+                message: task.message,
+            },
+        );
+    }
 }
 
 fn extract_task_id(data: &serde_json::Value) -> Result<String, String> {
@@ -820,450 +803,7 @@ fn extract_task_id(data: &serde_json::Value) -> Result<String, String> {
         .ok_or_else(|| "Server response missing task_id".to_string())
 }
 
-fn collect_directory_entries(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let mut entries = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-
-    while let Some(path) = stack.pop() {
-        let children = std::fs::read_dir(&path)
-            .map_err(|e| format!("Failed to read directory {}: {e}", path.display()))?;
-        for child in children {
-            let child = child.map_err(|e| format!("Failed to read directory entry: {e}"))?;
-            let child_path = child.path();
-            if child_path.is_dir() {
-                stack.push(child_path.clone());
-            }
-            entries.push(child_path);
-        }
-    }
-
-    entries.sort_by(|a, b| {
-        let a_depth = a.components().count();
-        let b_depth = b.components().count();
-        a_depth.cmp(&b_depth).then_with(|| a.cmp(b))
-    });
-    Ok(entries)
-}
-
-pub(crate) async fn server_action_json(
-    state: &AppHandleState,
-    action: &str,
-    data: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let resp = server_action_response(state, action, data).await?;
-    if resp.code != 200 {
-        return Err(format_server_response_error(&resp));
-    }
-
-    Ok(resp.data)
-}
-
-/// Send an authenticated server action while preserving the complete response
-/// envelope. Unlike `server_action_json`, non-200 responses are returned to the
-/// caller so developer tooling can inspect the server's structured result.
-async fn server_action_response(
-    state: &AppHandleState,
-    action: &str,
-    data: serde_json::Value,
-) -> Result<cfms_core::Response, String> {
-    let expected_identity = capture_server_action_identity(&state.inner).await?;
-    let mut last_error = None;
-    for attempt in 1..=cfms_service::services::connection::DEFAULT_RECONNECT_ATTEMPTS {
-        let (conn, username, token) = get_connection_auth(state).await?;
-        ensure_server_action_identity(&state.inner, &expected_identity, &username).await?;
-        match send_action_request(&conn, action, data.clone(), &username, &token).await {
-            Ok(resp) => return Ok(resp),
-            Err(error) if is_transient_connection_error(&error) => {
-                tracing::warn!(
-                    "Request {action} failed on attempt {attempt}; reconnecting: {error}",
-                );
-                last_error = Some(error);
-                cfms_service::services::connection::ensure_connected(
-                    &state.inner,
-                    cfms_service::services::connection::DEFAULT_RECONNECT_ATTEMPTS,
-                    true,
-                )
-                .await?;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(last_error.unwrap_or_else(|| format!("{action} failed after reconnect attempts")))
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct ServerActionIdentity {
-    server_address: Option<String>,
-    username: String,
-}
-
-async fn capture_server_action_identity(
-    state: &cfms_service::state::AppState,
-) -> Result<ServerActionIdentity, String> {
-    let server_address = state.server_address.read().await.clone();
-    let username = state
-        .username
-        .read()
-        .await
-        .clone()
-        .ok_or_else(|| "Not logged in".to_string())?;
-    Ok(ServerActionIdentity {
-        server_address,
-        username,
-    })
-}
-
-async fn ensure_server_action_identity(
-    state: &cfms_service::state::AppState,
-    expected: &ServerActionIdentity,
-    username: &str,
-) -> Result<(), String> {
-    let current = ServerActionIdentity {
-        server_address: state.server_address.read().await.clone(),
-        username: username.to_string(),
-    };
-    validate_server_action_identity(expected, &current)
-}
-
-fn validate_server_action_identity(
-    expected: &ServerActionIdentity,
-    current: &ServerActionIdentity,
-) -> Result<(), String> {
-    if current == expected {
-        return Ok(());
-    }
-    Err("Request cancelled because the active server or account changed".to_string())
-}
-
-async fn server_action_bool(
-    state: &AppHandleState,
-    action: &str,
-    data: serde_json::Value,
-) -> Result<bool, String> {
-    server_action_json(state, action, data).await?;
-    Ok(true)
-}
-
-fn suffixed_upload_name(name: &str, suffix: usize) -> String {
-    let path = std::path::Path::new(name);
-    let extension = path.extension().and_then(|value| value.to_str());
-    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or(name);
-    match extension {
-        Some(extension) if !stem.is_empty() => format!("{stem} ({suffix}).{extension}"),
-        _ => format!("{name} ({suffix})"),
-    }
-}
-
-fn relative_upload_path(path: &std::path::Path) -> String {
-    path.components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(value) => Some(value.to_string_lossy().into_owned()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn split_listing_page(page: ListingCursorPage) -> ListDirectoryResponse {
-    let mut folders = Vec::new();
-    let mut documents = Vec::new();
-
-    for item in page.items {
-        match item {
-            cfms_core::ServerListingItem::Directory(folder) => folders.push(folder),
-            cfms_core::ServerListingItem::Document(document) => documents.push(document),
-        }
-    }
-
-    ListDirectoryResponse {
-        folders,
-        documents,
-        parent_id: page.parent_id,
-    }
-}
-
-fn split_listing_page_dto(page: ListingCursorPage) -> ListDirectoryPageDto {
-    let page_size = page.page_size;
-    let next_cursor = page.next_cursor.clone();
-    let has_more = page.has_more;
-    let split = split_listing_page(page);
-
-    ListDirectoryPageDto {
-        folders: split.folders,
-        documents: split.documents,
-        parent_id: split.parent_id,
-        page_size,
-        next_cursor,
-        has_more,
-    }
-}
-
-fn merge_listing_response(target: &mut ListDirectoryResponse, page: ListingCursorPage) {
-    target.parent_id = page.parent_id.clone();
-    let split = split_listing_page(page);
-    target.folders.extend(split.folders);
-    target.documents.extend(split.documents);
-}
-
-async fn fetch_all_listing_pages(
-    state: &AppHandleState,
-    action: &str,
-    mut data: serde_json::Value,
-) -> Result<ListDirectoryResponse, String> {
-    let mut combined = ListDirectoryResponse {
-        folders: Vec::new(),
-        documents: Vec::new(),
-        parent_id: None,
-    };
-    let mut cursor: Option<String> = None;
-
-    loop {
-        data["page_size"] = serde_json::json!(SERVER_CURSOR_PAGE_SIZE);
-        data["cursor"] = cursor
-            .as_ref()
-            .map(|value| serde_json::Value::String(value.clone()))
-            .unwrap_or(serde_json::Value::Null);
-
-        let page: ListingCursorPage = serde_json::from_value(server_action_json(state, action, data.clone()).await?)
-            .map_err(|e| format!("Invalid {action} page response: {e}"))?;
-        let has_more = page.has_more;
-        cursor = page.next_cursor.clone();
-        merge_listing_response(&mut combined, page);
-
-        if !has_more {
-            break;
-        }
-        if cursor.is_none() {
-            return Err(format!("{action} reported more pages without next_cursor"));
-        }
-    }
-
-    Ok(combined)
-}
-
-async fn fetch_all_cursor_items(
-    state: &AppHandleState,
-    action: &str,
-    mut data: serde_json::Value,
-) -> Result<Vec<serde_json::Value>, String> {
-    let mut items = Vec::new();
-    let mut cursor: Option<String> = None;
-
-    loop {
-        data["page_size"] = serde_json::json!(SERVER_CURSOR_PAGE_SIZE);
-        data["cursor"] = cursor
-            .as_ref()
-            .map(|value| serde_json::Value::String(value.clone()))
-            .unwrap_or(serde_json::Value::Null);
-
-        let page: CursorPage<serde_json::Value> =
-            serde_json::from_value(server_action_json(state, action, data.clone()).await?)
-                .map_err(|e| format!("Invalid {action} page response: {e}"))?;
-        let has_more = page.has_more;
-        cursor = page.next_cursor.clone();
-        items.extend(page.items);
-
-        if !has_more {
-            break;
-        }
-        if cursor.is_none() {
-            return Err(format!("{action} reported more pages without next_cursor"));
-        }
-    }
-
-    Ok(items)
-}
-
-fn split_search_page(mut page: CursorPage<serde_json::Value>) -> serde_json::Value {
-    let mut documents = Vec::new();
-    let mut directories = Vec::new();
-
-    for item in page.items.drain(..) {
-        match item.get("type").and_then(|value| value.as_str()) {
-            Some("directory") => directories.push(item),
-            Some("document") => documents.push(item),
-            _ => {}
-        }
-    }
-
-    serde_json::json!({
-        "documents": documents,
-        "directories": directories,
-        "page_size": page.page_size,
-        "next_cursor": page.next_cursor,
-        "has_more": page.has_more,
-    })
-}
-
-#[cfg(test)]
-mod protocol_v15_tests {
-    use super::*;
-
-    #[test]
-    fn split_listing_page_maps_v15_items_to_legacy_response() {
-        let page: ListingCursorPage = serde_json::from_str(
-            r#"{
-                "items": [
-                    { "type": "directory", "id": "dir", "name": "Folder", "created_time": 1.0 },
-                    { "type": "document", "id": "doc", "title": "File", "name": "File", "size": 5, "last_modified": 2.0 }
-                ],
-                "page_size": 128,
-                "next_cursor": null,
-                "has_more": false,
-                "parent_id": "/"
-            }"#,
-        )
-        .unwrap();
-
-        let split = split_listing_page(page);
-
-        assert_eq!(split.folders.len(), 1);
-        assert_eq!(split.folders[0].name, "Folder");
-        assert_eq!(split.documents.len(), 1);
-        assert_eq!(split.documents[0].title, "File");
-        assert_eq!(split.parent_id.as_deref(), Some("/"));
-    }
-
-    #[test]
-    fn split_listing_page_dto_preserves_cursor_metadata() {
-        let page: ListingCursorPage = serde_json::from_str(
-            r#"{
-                "items": [
-                    { "type": "directory", "id": "dir", "name": "Folder", "created_time": 1.0 },
-                    { "type": "document", "id": "doc", "title": "File", "size": 5, "last_modified": 2.0 }
-                ],
-                "page_size": 128,
-                "next_cursor": "next-page",
-                "has_more": true,
-                "parent_id": "parent"
-            }"#,
-        )
-        .unwrap();
-
-        let split = split_listing_page_dto(page);
-
-        assert_eq!(split.folders.len(), 1);
-        assert_eq!(split.documents.len(), 1);
-        assert_eq!(split.parent_id.as_deref(), Some("parent"));
-        assert_eq!(split.page_size, 128);
-        assert_eq!(split.next_cursor.as_deref(), Some("next-page"));
-        assert!(split.has_more);
-    }
-
-    #[test]
-    fn directory_page_size_is_clamped_to_protocol_limits() {
-        assert_eq!(directory_page_size(None), SERVER_CURSOR_PAGE_SIZE);
-        assert_eq!(directory_page_size(Some(0)), 1);
-        assert_eq!(directory_page_size(Some(32)), 32);
-        assert_eq!(directory_page_size(Some(10_000)), SERVER_CURSOR_PAGE_SIZE);
-    }
-
-    #[test]
-    fn invalid_listing_page_returns_a_descriptive_error() {
-        let error = parse_listing_page_dto(serde_json::json!({ "has_more": false }))
-            .expect_err("missing page fields must fail");
-
-        assert!(error.starts_with("Invalid list_directory page response:"));
-    }
-
-    #[test]
-    fn split_search_page_preserves_cursor_metadata() {
-        let page: CursorPage<serde_json::Value> = serde_json::from_str(
-            r#"{
-                "items": [
-                    { "type": "directory", "id": "dir", "name": "Folder" },
-                    { "type": "document", "id": "doc", "name": "File", "size": 5 }
-                ],
-                "page_size": 64,
-                "next_cursor": "cursor",
-                "has_more": true
-            }"#,
-        )
-        .unwrap();
-
-        let split = split_search_page(page);
-
-        assert_eq!(split["directories"].as_array().unwrap().len(), 1);
-        assert_eq!(split["documents"].as_array().unwrap().len(), 1);
-        assert_eq!(split["page_size"], 64);
-        assert_eq!(split["next_cursor"], "cursor");
-        assert_eq!(split["has_more"], true);
-    }
-
-    #[test]
-    fn keep_both_suffix_preserves_file_extension() {
-        assert_eq!(suffixed_upload_name("report.pdf", 2), "report (2).pdf");
-        assert_eq!(suffixed_upload_name("README", 1), "README (1)");
-    }
-
-    #[test]
-    fn relative_upload_paths_use_protocol_separators() {
-        let path = std::path::Path::new("nested").join("reports").join("summary.txt");
-        assert_eq!(relative_upload_path(&path), "nested/reports/summary.txt");
-    }
-}
-
-async fn clear_auth_state(state: &AppHandleState) {
-    state.public_keys.cancel();
-    state.inner.clear_auth().await;
-    state.tasks.clear();
-    state.upload_tasks.clear();
-}
-
-async fn close_primary_connection(state: &AppHandleState) {
-    let conn = {
-        let mut c = state.inner.conn.write().await;
-        c.take()
-    };
-
-    if let Some(conn) = conn {
-        tokio::spawn(async move { conn.close().await });
-    }
-}
-
-async fn clear_connection_state(state: &AppHandleState) {
-    {
-        let mut addr = state.inner.server_address.write().await;
-        *addr = None;
-    }
-    {
-        let mut name = state.inner.server_name.write().await;
-        *name = None;
-    }
-    {
-        let mut pv = state.inner.server_protocol_version.write().await;
-        *pv = None;
-    }
-    state.inner.server_extension_flags.write().await.clear();
-    state
-        .inner
-        .app_lockdown
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-    *state.inner.lockdown_reason.write().await = None;
-    {
-        let mut ca = state.inner.ca_dir.write().await;
-        *ca = None;
-    }
-    {
-        let mut force_ipv4 = state.inner.force_ipv4.write().await;
-        *force_ipv4 = false;
-    }
-    {
-        let mut proxy = state.inner.proxy_addr.write().await;
-        *proxy = None;
-    }
-    {
-        let mut cert = state.inner.client_cert_path.write().await;
-        *cert = None;
-    }
-    {
-        let mut key = state.inner.client_key_path.write().await;
-        *key = None;
-    }
-}
-
-fn non_empty_optional(value: Option<String>) -> Option<String> {
+pub(super) fn non_empty_optional(value: Option<String>) -> Option<String> {
     value.and_then(|v| {
         let trimmed = v.trim().to_string();
         if trimmed.is_empty() {
@@ -1274,86 +814,8 @@ fn non_empty_optional(value: Option<String>) -> Option<String> {
     })
 }
 
-/// Build a JSON auth-status payload (auth fields only — no server state).
-async fn build_auth_status(inner: &cfms_service::state::AppState) -> serde_json::Value {
-    let pending = inner.pending_auth.read().await.as_ref().map(|p| {
-        (
-            p.username.clone(),
-            p.issued.claims.purpose,
-            p.methods.clone(),
-        )
-    });
-    let username = inner
-        .username
-        .read()
-        .await
-        .clone()
-        .or_else(|| pending.as_ref().map(|p| p.0.clone()));
-    let nickname = inner.nickname.read().await.clone();
-    let has_token = inner.token.read().await.is_some();
-    let token_exp = *inner.token_exp.read().await;
-    let escalation_exp = inner
-        .escalation
-        .read()
-        .await
-        .as_ref()
-        .filter(|issued| issued.claims.exp > cfms_service::authentication::unix_now())
-        .map(|issued| issued.claims.exp);
-    let permissions = inner.permissions.read().await.clone();
-    let groups = inner.groups.read().await.clone();
-    let has_server_preference_dek = inner.server_preference_dek.read().await.is_some();
-    let has_preference_dek = inner.dek.read().await.is_some();
-
-    let mut status = serde_json::json!({
-        "username": username,
-        "user_id": inner.user_id.read().await.clone(),
-        "nickname": nickname,
-        "has_token": has_token,
-        "token_exp": token_exp,
-        "escalation_exp": escalation_exp,
-        "permissions": permissions,
-        "groups": groups,
-        "avatar_path": inner.avatar_path.read().await.clone(),
-        "has_server_preference_dek": has_server_preference_dek,
-        "has_preference_dek": has_preference_dek,
-    });
-
-    if let Some(pending) = pending.as_ref().filter(|p| p.1 == AUTH) {
-        status["requires_2fa"] = serde_json::Value::Bool(true);
-        status["authentication_methods"] = serde_json::json!(pending.2);
-    }
-
-    status
-}
-
-/// Build a JSON server-state payload (connection fields only — no auth data).
-async fn build_server_state(inner: &cfms_service::state::AppState) -> serde_json::Value {
-    let connected = inner
-        .conn
-        .read()
-        .await
-        .as_ref()
-        .is_some_and(|conn| !conn.is_closed());
-    let server_address = inner.server_address.read().await.clone();
-    let server_name = inner.server_name.read().await.clone();
-    let protocol_version = inner.server_protocol_version.read().await;
-    let extension_flags = inner.server_extension_flags.read().await.clone();
-    let lockdown = inner.app_lockdown.load(std::sync::atomic::Ordering::SeqCst);
-    let lockdown_reason = inner.lockdown_reason.read().await.clone();
-
-    serde_json::json!({
-        "connected": connected,
-        "server_address": server_address,
-        "server_name": server_name,
-        "protocol_version": *protocol_version,
-        "lockdown": lockdown,
-        "lockdown_reason": lockdown_reason,
-        "extension_flags": extension_flags,
-    })
-}
-
 /// Current Unix timestamp in seconds.
-fn unix_now() -> i64 {
+pub(super) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

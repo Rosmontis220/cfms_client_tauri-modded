@@ -1,9 +1,8 @@
 //! CFMS Core — shared foundation types, constants, and error handling.
 //!
-//! This crate has **zero** external dependencies beyond `thiserror` (for the
-//! error enum) and `serde` (for data types that cross crate/process
-//! boundaries).  It is the single source of truth for protocol constants and
-//! the unified [`Error`] type.
+//! Shared protocol records, constants, error categories, revocation evidence,
+//! and deterministic cache-key hashing. This foundation never depends on the
+//! native shell or the service, transfer, transport, and crypto crates.
 
 #![forbid(unsafe_code)]
 
@@ -11,18 +10,22 @@ use sha2::{Digest, Sha256};
 
 pub mod constants;
 pub mod error;
+pub mod extension_types;
+pub mod revocation;
+pub use revocation::{RevocationState, RevocationStatus};
 pub mod types;
 
 // Re-export the most commonly used items so downstream crates can write
 // `cfms_core::Error` instead of `cfms_core::error::Error`.
 pub use error::{Error, Result};
+pub use extension_types::ExtensionPreference;
 pub use types::{
     AppearancePreference, ColorSchemePreference, CursorPage, DEFAULT_TASK_CONCURRENCY,
     DownloadFailureKind, DownloadPhase, DownloadProgress, DownloadTaskDto, DownloadTaskStatus,
-    ExtensionPreference, Favourites, FileEntry, FileMetadata, ListDirectoryResponse,
-    MAX_TASK_CONCURRENCY, MIN_TASK_CONCURRENCY, NodeLookupResponse, PRIVACY_PREFERENCE_VERSION,
-    PermissionEntry, PrivacyPreference, ReduceMotionPreference, Response, Schedule,
-    ScheduleTrigger, ScheduledTaskType, ServerDiagnosticDatabase, ServerDiagnosticExtension,
+    Favourites, FileEntry, FileMetadata, ListDirectoryResponse, MAX_TASK_CONCURRENCY,
+    MIN_TASK_CONCURRENCY, NodeLookupResponse, PRIVACY_PREFERENCE_VERSION, PermissionEntry,
+    PrivacyPreference, ReduceMotionPreference, Response, Schedule, ScheduleTrigger,
+    ScheduledTaskType, ServerDiagnosticDatabase, ServerDiagnosticExtension,
     ServerDiagnosticIdentity, ServerDiagnosticLockdown, ServerDiagnosticProviders,
     ServerDiagnosticRuntime, ServerDiagnosticScheduling, ServerDiagnostics, ServerDirectoryEntry,
     ServerDocumentEntry, ServerInfo, ServerListingItem, ServiceEvent, ServiceStatusInfo,
@@ -48,6 +51,6 @@ pub fn get_server_hash(server_address: &str) -> String {
 /// Mirrors [`get_username_hash`] in the Python reference.
 pub fn get_username_hash(username: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(username.trim().as_bytes());
+    hasher.update(username.as_bytes());
     hex::encode(&hasher.finalize()[..8])
 }

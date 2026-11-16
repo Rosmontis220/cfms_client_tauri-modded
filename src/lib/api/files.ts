@@ -1,6 +1,8 @@
 // CFMS Client - typed Tauri IPC wrappers.
 import { Channel, invoke } from '@tauri-apps/api/core';
-import type { AccessEntry, AccessEntityType, AccessType, BatchActionResult, DirectoryFileConflictResolution, DirectoryUploadConflict, ListDirectoryPageResponse, ListDirectoryResponse, NodeLookupResponse, RevisionEntry, SearchFilesResponse, SelectedUploadDirectory, ServerDirectoryInfo, ServerDocumentInfo, ServerObjectType, UploadConflictStrategy, UploadEnqueueRequest, UploadTaskDto } from './types';
+import type { AccessEntry, AccessEntityType, AccessType } from './types/access';
+import type { BatchActionResult, DirectoryFileConflictResolution, DirectoryUploadConflict, SelectedUploadDirectory, UploadConflictStrategy, UploadEnqueueRequest, UploadBatchResult, UploadTaskDto } from './types/transfers';
+import type { ListDirectoryPageResponse, ListDirectoryResponse, NodeLookupResponse, RevisionEntry, SearchFilesResponse, ServerDirectoryInfo, ServerDocumentInfo, ServerObjectType } from './types/files';
 
 export interface DownloadBatchMetadata {
   batchId: string;
@@ -8,6 +10,14 @@ export interface DownloadBatchMetadata {
   batchRootId?: string | null;
   batchCreatedAt: number;
   batchEstimatedTotal?: number | null;
+}
+
+export interface ResolvedNodeTarget {
+  segments: Array<{ id: string; label: string }>;
+  target: { kind: 'directory'; id: string; label: string } | { kind: 'document'; id: string; label: string; parentId: string | null };
+}
+export function resolveNodeTarget(path: string): Promise<ResolvedNodeTarget> {
+  return invoke('resolve_node_target', { path });
 }
 
 /** List a directory on the CFMS server via the active WSS connection.
@@ -184,6 +194,11 @@ export async function downloadGitCommit(message: string): Promise<string> {
 /** Open a completed download with the platform's default application. */
 export async function openDownloadedFile(taskId: string): Promise<void> {
   return invoke("open_downloaded_file", { taskId });
+}
+
+/** Show a completed download inside the platform's file manager. */
+export async function revealDownloadedFile(taskId: string): Promise<void> {
+  return invoke("reveal_downloaded_file", { taskId });
 }
 
 /** Create a new directory on the CFMS server.
@@ -492,6 +507,10 @@ export async function resumeUpload(uploadId: string): Promise<boolean> {
 
 export async function cancelUpload(uploadId: string): Promise<boolean> {
   return invoke("cancel_upload", { uploadId });
+}
+
+export async function enqueueUploadBatch(requests: UploadEnqueueRequest[]): Promise<UploadBatchResult> {
+  return invoke("enqueue_upload_batch", { requests });
 }
 
 export async function enqueueUploadTask(request: UploadEnqueueRequest): Promise<UploadTaskDto> {

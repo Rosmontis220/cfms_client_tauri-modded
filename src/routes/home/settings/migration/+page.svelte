@@ -9,11 +9,11 @@
   import { _ as t } from 'svelte-i18n';
   import { onMount } from 'svelte';
   import { relaunch } from '@tauri-apps/plugin-process';
-  import FluentButton from '$lib/components/FluentButton.svelte';
-  import Icon from '$lib/components/Icon.svelte';
-  import MdSwitch from '$lib/components/MdSwitch.svelte';
-  import ProgressRing from '$lib/components/ProgressRing.svelte';
-  import SettingsPageHeader from '$lib/components/SettingsPageHeader.svelte';
+  import FluentButton from '$lib/shared/ui/FluentButton.svelte';
+  import Icon from '$lib/shared/ui/Icon.svelte';
+  import MdSwitch from '$lib/shared/ui/MdSwitch.svelte';
+  import ProgressRing from '$lib/shared/ui/ProgressRing.svelte';
+  import SettingsPageHeader from '$lib/shared/ui/SettingsPageHeader.svelte';
   import {
     importMigration,
     scanMigrationSource,
@@ -21,8 +21,8 @@
     type MigrationReport,
     type MigrationScan,
   } from '$lib/api';
-  import { pickDirectory } from '$lib/directory-picker';
-  import { formatBytes } from '$lib/files/formatting';
+  import { pickDirectory } from '$lib/shared/platform/directory-picker';
+  import { formatBytes } from '$lib/shared/format/values';
   import { notificationStore } from '$lib/stores.svelte';
 
   // Full literal keys keep the translation catalog check meaningful.

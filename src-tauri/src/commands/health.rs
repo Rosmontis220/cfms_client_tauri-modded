@@ -1,3 +1,8 @@
+use crate::AppHandleState;
+use cfms_core::ServiceEvent;
+use cfms_core::ServiceStatusInfo;
+use cfms_core::constants;
+
 // Health / info (existing commands, preserved for backward compat)
 // ---------------------------------------------------------------------------
 
@@ -25,19 +30,6 @@ pub fn crypto_info() -> serde_json::Value {
         "nonce_len": constants::NONCE_LEN,
         "tag_len": constants::TAG_LEN,
     })
-}
-
-// ---------------------------------------------------------------------------
-// Local network diagnostics
-// ---------------------------------------------------------------------------
-
-/// Return the local host IP addresses (IPv4 and IPv6) for diagnostic use.
-#[tauri::command]
-pub fn local_ip_addresses() -> Vec<String> {
-    crate::local_ip_addresses()
-        .into_iter()
-        .map(|ip| ip.to_string())
-        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -87,9 +79,9 @@ pub async fn get_service_status(
 #[tauri::command]
 pub async fn validate_file_shortcuts(
     state: tauri::State<'_, AppHandleState>,
-) -> Result<cfms_service::services::favorites::ShortcutValidationStatus, String> {
+) -> Result<cfms_service::files::shortcuts::ShortcutValidationStatus, String> {
     let status =
-        cfms_service::services::favorites::validate_now(&state.inner, &state.app_data_dir).await;
+        cfms_service::files::shortcuts::validate_now(&state.inner, &state.app_data_dir).await;
 
     let _ = state
         .inner
