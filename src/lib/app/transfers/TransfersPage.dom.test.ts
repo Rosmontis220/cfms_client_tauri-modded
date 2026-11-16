@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   deleteDownloadedFiles: vi.fn(),
   removeTransferRecords: vi.fn(),
   controlTransferTasks: vi.fn(),
+  revealDownloadedFile: vi.fn(),
 }));
 
 vi.mock('$lib/api', () => ({
@@ -35,6 +36,7 @@ vi.mock('$lib/api', () => ({
   resumeDownload: vi.fn(),
   retryDownload: vi.fn(),
   retryUploadTask: vi.fn(),
+  revealDownloadedFile: mocks.revealDownloadedFile,
   uploadDirectory: vi.fn(),
   uploadDocumentFile: vi.fn(),
 }));
@@ -216,6 +218,23 @@ describe('bulk selection and cleanup', () => {
     await fireEvent.click(screen.getByRole('menuitem', { name: 'tasks.cleanup.active (1)' }));
     expect(mocks.controlTransferTasks).not.toHaveBeenCalled();
     expect(downloadStore.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('revealing a finished download', () => {
+  it('offers the folder action only once the file is complete and forwards the task id', async () => {
+    downloadStore.tasks.set('complete', { ...batchTask('complete', 'completed'), batch_id: null });
+    await renderLoadedPage();
+    await fireEvent.click(screen.getByRole('button', { name: 'common.showMore' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'tasks.revealInFolder' }));
+    await waitFor(() => expect(mocks.revealDownloadedFile).toHaveBeenCalledWith('complete'));
+  });
+
+  it('keeps the action hidden while the transfer is still running', async () => {
+    downloadStore.tasks.set('running', { ...batchTask('running', 'downloading'), batch_id: null });
+    await renderLoadedPage();
+    await fireEvent.click(screen.getByRole('button', { name: 'common.showMore' }));
+    expect(screen.queryByRole('button', { name: 'tasks.revealInFolder' })).toBeNull();
   });
 });
 

@@ -24,7 +24,7 @@ const download: DownloadTaskDto = {
 };
 const actions = {
   onPause: vi.fn(), onResume: vi.fn(), onCancel: vi.fn(), onRemove: vi.fn(),
-  onRestart: vi.fn(), onReselect: vi.fn(), onRetry: vi.fn(), onOpen: vi.fn(), onDeleteFile: vi.fn(),
+  onRestart: vi.fn(), onReselect: vi.fn(), onRetry: vi.fn(), onOpen: vi.fn(), onReveal: vi.fn(), onDeleteFile: vi.fn(),
 };
 
 describe('transfer failure details in task cards', () => {

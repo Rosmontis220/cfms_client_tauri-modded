@@ -87,6 +87,7 @@ macro_rules! invoke_handler {
             $crate::commands::scan_local_chatbox,
             $crate::commands::open_local_path,
             $crate::commands::open_downloaded_document,
+            $crate::commands::reveal_downloaded_file,
             $crate::commands::documents::upload_chat_record,
             $crate::commands::save_credentials,
             $crate::commands::load_credentials,

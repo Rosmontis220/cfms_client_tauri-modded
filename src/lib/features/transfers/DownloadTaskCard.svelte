@@ -5,6 +5,7 @@
     downloadCapabilities, downloadPhaseMessageKey, downloadStatusMessageKey,
   } from '$lib/features/transfers/transfer-task-view';
   import { formatPathFilename } from '$lib/shared/format/path-format';
+  import { isMobilePlatform } from '$lib/shared/platform/platform';
   import { shortIdentifier } from '$lib/shared/format/identifiers';
   import { formatLocalDateTimeWithUtcOffset } from '$lib/shared/format/date-time';
   import { serverAvailability } from '$lib/api/server-errors';
@@ -16,7 +17,7 @@
   import Icon from '$lib/shared/ui/Icon.svelte';
   import TaskActionButton from '$lib/features/transfers/TaskActionButton.svelte';
 
-  type PendingAction = 'pause' | 'resume' | 'retry' | 'cancel' | 'open' | 'remove' | 'delete' | null;
+  type PendingAction = 'pause' | 'resume' | 'retry' | 'cancel' | 'open' | 'reveal' | 'remove' | 'delete' | null;
   interface Props {
     task: DownloadTaskDto;
     onPause: (id: string) => Promise<void>;
@@ -24,15 +25,19 @@
     onRetry: (id: string) => Promise<void>;
     onCancel: (id: string) => Promise<void>;
     onOpen: (id: string) => Promise<void>;
+    onReveal: (id: string) => Promise<void>;
     onRemove: (id: string) => Promise<void>;
     onDeleteFile: (id: string) => Promise<void>;
     pendingAction?: PendingAction;
     bytesPerSecond?: number;
   }
 
-  let { task, onPause, onResume, onRetry, onCancel, onOpen, onRemove, onDeleteFile, pendingAction = null, bytesPerSecond = 0 }: Props = $props();
+  let { task, onPause, onResume, onRetry, onCancel, onOpen, onReveal, onRemove, onDeleteFile, pendingAction = null, bytesPerSecond = 0 }: Props = $props();
   let expanded = $state(false);
   const capabilities = $derived(downloadCapabilities(task));
+  // File managers can select an entry everywhere the desktop shell runs; the
+  // Android host has no equivalent intent, so the action stays hidden there.
+  const canRevealInFolder = !isMobilePlatform();
   const displayName = $derived(formatPathFilename(task.filename));
   const phaseMessageKey = $derived(downloadPhaseMessageKey(task));
   const retryReasonKey = $derived.by(() => {
@@ -126,6 +131,7 @@
       {#if displayError}<p class="detail-error"><span class="cfms-icon-text__icon"><Icon name="errorFilled" size="16px" /></span><span class="error-text">{displayError}</span></p>{/if}
       {#if capabilities.cancel && !capabilities.pause && task.status !== 'paused'}<p class="text-xs text-md3-on-surface-variant">{$t('tasks.pauseUnavailable')}</p>{/if}
       <div class="detail-actions">
+        {#if capabilities.open && canRevealInFolder}<TaskActionButton presentation="labelled" icon="folderOpen" label={$t('tasks.revealInFolder')} onclick={() => run('reveal', onReveal)} disabled={Boolean(pendingAction)} />{/if}
         {#if capabilities.cancel}<TaskActionButton presentation="labelled" icon="stopTransfer" label={$t('tasks.cancelTransfer')} tone="danger" onclick={() => run('cancel', onCancel)} disabled={Boolean(pendingAction)} />{/if}
         {#if capabilities.deleteFile}<TaskActionButton presentation="labelled" icon="delete" label={$t('tasks.deleteLocalFile')} tone="danger" onclick={() => run('delete', onDeleteFile)} disabled={Boolean(pendingAction)} />{/if}
         {#if capabilities.removeRecord}<TaskActionButton presentation="labelled" icon="removeTransferRecord" label={$t('tasks.removeRecord')} onclick={() => run('remove', onRemove)} disabled={Boolean(pendingAction)} />{/if}

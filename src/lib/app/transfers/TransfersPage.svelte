@@ -7,7 +7,7 @@
   import {
     cancelDownload, controlTransferTasks, deleteDownloadedFiles, getDownloadTasks, getUploadTasks,
     getDocument, getDocumentInfo, openDownloadedFile, pauseDownload, removeTransferRecords,
-    resumeDownload, retryDownload, retryUploadTask,
+    resumeDownload, retryDownload, retryUploadTask, revealDownloadedFile,
   } from '$lib/api';
   import { formatUserFacingError } from '$lib/shared/errors/user-facing-errors';
   import { dialogStore } from '$lib/shared/ui/dialogs.svelte.ts';
@@ -312,6 +312,7 @@ import { uploadStore } from "$lib/features/transfers/upload-state.svelte.ts";
   }
 
   async function handleOpen(id: string) { await runDownload(id, () => openDownloadedFile(id)); }
+  async function handleReveal(id: string) { await runDownload(id, () => revealDownloadedFile(id), false); }
   async function handlePause(id: string) { await runDownload(id, () => pauseDownload(id)); }
   async function handleResume(id: string) { await runDownload(id, () => resumeDownload(id)); }
   async function handleRetry(id: string) { await runDownload(id, () => retryDownload(id)); }
@@ -592,7 +593,7 @@ import { uploadStore } from "$lib/features/transfers/upload-state.svelte.ts";
             {@const task = row.row.task}
             <div class="selectable-row" class:group-child={row.row.kind === 'group-task'}>
               <MdCheckbox checked={selectedIds.has(row.row.task.task_id)} disabled={bulkBusy} ariaLabel={$t('tasks.selectTask', { values: { name: row.row.task.filename } })} onChange={checked => selectTasks([task], checked)} />
-              <div class="transfer-row-content"><DownloadTaskCard task={row.row.task} onPause={handlePause} onResume={handleResume} onRetry={handleRetry} onCancel={handleCancel} onOpen={handleOpen} onRemove={handleRemoveDownload} onDeleteFile={handleDeleteFile} bytesPerSecond={downloadStore.speeds.get(row.row.task.task_id) ?? 0} pendingAction={bulkBusy || pendingDownloadActions.has(row.row.task.task_id) ? 'cancel' : null} /></div>
+              <div class="transfer-row-content"><DownloadTaskCard task={row.row.task} onPause={handlePause} onResume={handleResume} onRetry={handleRetry} onCancel={handleCancel} onOpen={handleOpen} onReveal={handleReveal} onRemove={handleRemoveDownload} onDeleteFile={handleDeleteFile} bytesPerSecond={downloadStore.speeds.get(row.row.task.task_id) ?? 0} pendingAction={bulkBusy || pendingDownloadActions.has(row.row.task.task_id) ? 'cancel' : null} /></div>
             </div>
           {/if}
         {/snippet}

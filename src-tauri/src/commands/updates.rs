@@ -187,7 +187,7 @@ pub async fn open_downloaded_file<R: tauri::Runtime>(
         .map_err(|e| format!("Failed to open downloaded file: {e}"))
 }
 
-fn prepare_downloaded_file_for_open(
+pub(crate) fn prepare_downloaded_file_for_open(
     state: &AppHandleState,
     task_id: &str,
 ) -> Result<String, String> {

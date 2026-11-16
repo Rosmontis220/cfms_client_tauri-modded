@@ -503,4 +503,7 @@ export const customZhCn = {
     loadFailed: '加载聊天记录失败：{error}',
     chatboxNotFound: '服务器上未找到 chatbox 文件夹。',
   },
+  tasks: {
+    revealInFolder: '打开所在文件夹',
+  },
 };

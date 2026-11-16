@@ -196,6 +196,11 @@ export async function openDownloadedFile(taskId: string): Promise<void> {
   return invoke("open_downloaded_file", { taskId });
 }
 
+/** Show a completed download inside the platform's file manager. */
+export async function revealDownloadedFile(taskId: string): Promise<void> {
+  return invoke("reveal_downloaded_file", { taskId });
+}
+
 /** Create a new directory on the CFMS server.
  *
  * Mirrors `create_directory` from the Python reference.

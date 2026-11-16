@@ -503,4 +503,7 @@ export const customEn = {
     loadFailed: 'Failed to load chat records: {error}',
     chatboxNotFound: 'The chatbox folder was not found on the server.',
   },
+  tasks: {
+    revealInFolder: 'Show in folder',
+  },
 };
