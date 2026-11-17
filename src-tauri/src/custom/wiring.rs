@@ -15,6 +15,11 @@ pub fn prepare_window_config(config: &mut tauri::utils::config::WindowConfig) {
     {
         config.title.push_str("-dev");
     }
+    // Release builds leave the window untouched, so the parameter would read as
+    // unused there; touch it so the lint stays quiet without renaming it away
+    // from what the call site in `bootstrap.rs` means.
+    #[cfg(not(debug_assertions))]
+    let _ = config;
 }
 
 /// Registers the fork's background services, before the manager is activated.
